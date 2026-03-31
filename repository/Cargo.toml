@@ -8,3 +8,4 @@ model.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
+chrono.workspace = true

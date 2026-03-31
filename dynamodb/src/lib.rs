@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use aws_sdk_dynamodb::types::{AttributeValue, Select};
 use aws_sdk_dynamodb::Client;
-use chrono::Utc;
+use chrono::{Datelike, Timelike, Utc};
 use items::{KeyItem, UsageLogItem, UserItem};
 use rand::Rng;
 use repository::Repository;
@@ -40,6 +40,7 @@ impl Repository for DynamoDbRepo {
             id: id.clone(),
             name: name.to_string(),
             created_at: now,
+            keycloak_sub: None,
         };
         let item: HashMap<String, AttributeValue> = serde_dynamo::to_item(UserItem::from(user))?;
 
@@ -286,5 +287,200 @@ impl Repository for DynamoDbRepo {
         let mut rows: Vec<_> = aggregates.into_values().collect();
         rows.sort_by(|a, b| (&a.user_id, &a.model).cmp(&(&b.user_id, &b.model)));
         Ok(rows)
+    }
+
+    async fn update_keycloak_sub(&self, user_id: &str, sub: &str) -> anyhow::Result<()> {
+        let pk = format!("USER#{user_id}");
+
+        self.client
+            .update_item()
+            .table_name(&self.table_name)
+            .key("pk", Self::s(&pk))
+            .key("sk", Self::s(&pk))
+            .update_expression("SET keycloak_sub = :sub")
+            .expression_attribute_values(":sub", Self::s(sub))
+            .condition_expression("attribute_exists(pk) AND #t = :type")
+            .expression_attribute_names("#t", "type")
+            .expression_attribute_values(":type", Self::s("USER"))
+            .send()
+            .await?;
+
+        Ok(())
+    }
+
+    async fn lookup_user_by_keycloak_sub(&self, sub: &str) -> anyhow::Result<Option<String>> {
+        let mut exclusive_start_key: Option<HashMap<String, AttributeValue>> = None;
+
+        loop {
+            let mut q = self
+                .client
+                .scan()
+                .table_name(&self.table_name)
+                .filter_expression("keycloak_sub = :sub AND #t = :type")
+                .expression_attribute_names("#t", "type")
+                .expression_attribute_values(":sub", Self::s(sub))
+                .expression_attribute_values(":type", Self::s("USER"));
+
+            if let Some(key) = exclusive_start_key.take() {
+                q = q.set_exclusive_start_key(Some(key));
+            }
+
+            let resp = q.send().await?;
+
+            if let Some(item) = resp.items().first() {
+                let user_item: UserItem = serde_dynamo::from_item(item.clone())?;
+                return Ok(Some(user_item.id));
+            }
+
+            if resp.last_evaluated_key().is_none() {
+                break;
+            }
+            exclusive_start_key = resp.last_evaluated_key().cloned();
+        }
+
+        Ok(None)
+    }
+
+    async fn usage_graph(
+        &self,
+        user_id: &str,
+        from: chrono::DateTime<chrono::Utc>,
+        to: chrono::DateTime<chrono::Utc>,
+        granularity: model::usage_log::Granularity,
+        model_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<model::usage_log::UsageGraphPoint>> {
+        let pk = format!("USER#{user_id}");
+        let mut logs: Vec<UsageLogItem> = Vec::new();
+        let mut exclusive_start_key: Option<HashMap<String, AttributeValue>> = None;
+
+        loop {
+            let mut q = self
+                .client
+                .query()
+                .table_name(&self.table_name)
+                .key_condition_expression("pk = :pk AND begins_with(sk, :prefix)")
+                .expression_attribute_values(":pk", Self::s(&pk))
+                .expression_attribute_values(":prefix", Self::s("LOG#"));
+
+            if let Some(key) = exclusive_start_key.take() {
+                q = q.set_exclusive_start_key(Some(key));
+            }
+
+            let resp = q.send().await?;
+
+            for item in resp.items() {
+                let log_item: UsageLogItem = serde_dynamo::from_item(item.clone())?;
+                logs.push(log_item);
+            }
+
+            if resp.last_evaluated_key().is_none() {
+                break;
+            }
+            exclusive_start_key = resp.last_evaluated_key().cloned();
+        }
+
+        // Group by period and sum tokens
+        let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64)> = std::collections::BTreeMap::new();
+
+        for log_item in &logs {
+            let created = chrono::DateTime::parse_from_rfc3339(&log_item.created_at)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .ok();
+
+            let Some(created) = created else { continue };
+
+            if created < from || created > to {
+                continue;
+            }
+
+            if let Some(m) = model_filter
+                && log_item.model != m
+            {
+                continue;
+            }
+
+            let period_key = match granularity {
+                model::usage_log::Granularity::FifteenMin => {
+                    let mins = created.minute();
+                    let slot = (mins / 15) * 15;
+                    format!("{}:{:02}", created.format("%Y-%m-%dT%H"), slot)
+                }
+                model::usage_log::Granularity::ThirtyMin => {
+                    let mins = created.minute();
+                    let slot = (mins / 30) * 30;
+                    format!("{}:{:02}", created.format("%Y-%m-%dT%H"), slot)
+                }
+                model::usage_log::Granularity::OneHour => {
+                    created.format("%Y-%m-%dT%H:00").to_string()
+                }
+                model::usage_log::Granularity::FourHours => {
+                    let slot = (created.hour() / 4) * 4;
+                    format!("{}T{:02}:00", created.format("%Y-%m-%d"), slot)
+                }
+                model::usage_log::Granularity::TwelveHours => {
+                    let slot = (created.hour() / 12) * 12;
+                    format!("{}T{:02}:00", created.format("%Y-%m-%d"), slot)
+                }
+                model::usage_log::Granularity::Daily => created.format("%Y-%m-%d").to_string(),
+                model::usage_log::Granularity::Weekly => {
+                    let week = created.iso_week();
+                    format!("{}-W{:02}", week.year(), week.week())
+                }
+                model::usage_log::Granularity::Monthly => created.format("%B %Y").to_string(),
+            };
+
+            let entry = buckets.entry(period_key).or_insert((0, 0, 0));
+            entry.0 += log_item.input_tokens.unwrap_or(0) as i64;
+            entry.1 += log_item.output_tokens.unwrap_or(0) as i64;
+            entry.2 += log_item.cache_read_tokens.unwrap_or(0) as i64;
+        }
+
+        Ok(buckets
+            .into_iter()
+            .map(|(period, (inputs, outputs, cache))| model::usage_log::UsageGraphPoint {
+                period,
+                inputs,
+                outputs,
+                cache,
+            })
+            .collect())
+    }
+
+    async fn list_models(&self, user_id: &str) -> anyhow::Result<Vec<String>> {
+        let mut models = std::collections::BTreeSet::new();
+        let pk = format!("USER#{user_id}");
+        let mut exclusive_start_key: Option<HashMap<String, AttributeValue>> = None;
+
+        loop {
+            let mut q = self
+                .client
+                .query()
+                .table_name(&self.table_name)
+                .key_condition_expression("pk = :pk AND begins_with(sk, :prefix)")
+                .expression_attribute_values(":pk", Self::s(&pk))
+                .expression_attribute_values(":prefix", Self::s("LOG#"))
+                .projection_expression("#m");
+
+            q = q.expression_attribute_names("#m", "model");
+
+            if let Some(key) = exclusive_start_key.take() {
+                q = q.set_exclusive_start_key(Some(key));
+            }
+
+            let resp = q.send().await?;
+
+            for item in resp.items() {
+                if let Some(AttributeValue::S(m)) = item.get("model") {
+                    models.insert(m.clone());
+                }
+            }
+
+            if resp.last_evaluated_key().is_none() {
+                break;
+            }
+            exclusive_start_key = resp.last_evaluated_key().cloned();
+        }
+
+        Ok(models.into_iter().collect())
     }
 }

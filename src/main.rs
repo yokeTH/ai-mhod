@@ -7,6 +7,7 @@ use axum::routing::get;
 use clap::Parser;
 use repository::Repository;
 use reqwest::Client;
+use server::auth;
 use server::routes;
 use server::{AppInner, AppState};
 use tracing_subscriber::EnvFilter;
@@ -48,6 +49,13 @@ enum UserCmd {
     Add { name: String },
     /// List all users
     List,
+    /// Set the Keycloak subject for a user
+    SetKeycloak {
+        /// User name
+        user: String,
+        /// Keycloak subject (sub claim)
+        sub: String,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -115,22 +123,30 @@ async fn run_server() {
         }
     });
 
+    let jwks_cache = server::auth::jwt::JwksCache::new(cfg.keycloak_jwks_url.clone());
+
     let state: AppState = Arc::new(AppInner {
         client,
         config: cfg.clone(),
         repo: Box::new(repo),
         usage_tx,
+        jwks_cache,
     });
     let port = state.config.port;
 
-    let zai_routes = routes::zai_router().layer(axum::middleware::from_fn_with_state(
+    let zai_routes = routes::zai::zai_router().layer(axum::middleware::from_fn_with_state(
         state.clone(),
-        server::auth::require_api_key,
+        auth::require_api_key,
     ));
+
+    let dashboard_routes = routes::dashboard::dashboard_router().layer(
+        axum::middleware::from_fn_with_state(state.clone(), auth::require_jwt),
+    );
 
     let app = Router::new()
         .nest("/zai", zai_routes)
-        .route("/health", get(routes::health))
+        .nest("/dashboard", dashboard_routes)
+        .route("/health", get(routes::zai::health))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
@@ -161,6 +177,20 @@ async fn run_user_cmd(cmd: UserCmd) {
             for u in users {
                 println!("{:<40} {:<20} {}", u.id, u.name, u.created_at);
             }
+        }
+        UserCmd::SetKeycloak { user, sub } => {
+            let user_id = db
+                .lookup_user_by_name(&user)
+                .await
+                .expect("failed to look up user");
+            if user_id.is_none() {
+                eprintln!("user '{user}' not found");
+                std::process::exit(1);
+            }
+            db.update_keycloak_sub(&user_id.unwrap(), &sub)
+                .await
+                .expect("failed to update keycloak sub");
+            println!("Updated keycloak_sub for '{user}' to '{sub}'");
         }
     }
 }
@@ -209,9 +239,7 @@ async fn run_key_cmd(cmd: KeyCmd) {
             }
         }
         KeyCmd::Revoke { key_id } => {
-            db.revoke_key(&key_id)
-                .await
-                .expect("failed to revoke key");
+            db.revoke_key(&key_id).await.expect("failed to revoke key");
             println!("Key '{key_id}' revoked.");
         }
     }

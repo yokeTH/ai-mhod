@@ -9,6 +9,8 @@ pub enum ProxyError {
     Unauthorized,
     #[error("upstream request failed: {0}")]
     UpstreamError(String),
+    #[error("{0}")]
+    BadRequest(String),
 }
 
 impl IntoResponse for ProxyError {
@@ -16,6 +18,7 @@ impl IntoResponse for ProxyError {
         let (status, message) = match &self {
             ProxyError::Unauthorized => (StatusCode::UNAUTHORIZED, self.to_string()),
             ProxyError::UpstreamError(msg) => (StatusCode::BAD_GATEWAY, msg.clone()),
+            ProxyError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
         };
 
         tracing::error!(error = %self, "Request failed");

@@ -1,15 +1,15 @@
+use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::any;
-use axum::Router;
 
+use crate::AppState;
 use crate::auth::KeyInfo;
 use crate::error::ProxyError;
 use crate::metrics::RequestMetrics;
 use crate::proxy::proxy_to;
-use crate::AppState;
 
 /// Router for /zai/* -> https://api.z.ai/*
 pub fn zai_router() -> Router<AppState> {
@@ -27,7 +27,9 @@ async fn zai_proxy_handler(
     body: Bytes,
 ) -> Result<Response, ProxyError> {
     if !ALLOWED_ENDPOINTS.iter().any(|ep| path.starts_with(ep)) {
-        return Err(ProxyError::UpstreamError(format!("path not allowed: {path}")));
+        return Err(ProxyError::UpstreamError(format!(
+            "path not allowed: {path}"
+        )));
     }
 
     let url = format!("https://api.z.ai/{path}");
@@ -42,7 +44,13 @@ async fn zai_proxy_handler(
         .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(String::from))
         .unwrap_or_default();
 
-    let metrics = RequestMetrics::new(&model, is_stream, &info.user_id, &info.api_key_id, state.usage_tx.clone());
+    let metrics = RequestMetrics::new(
+        &model,
+        is_stream,
+        &info.user_id,
+        &info.api_key_id,
+        state.usage_tx.clone(),
+    );
 
     tracing::info!(
         request_id = %metrics.request_id(),

@@ -9,6 +9,7 @@ pub struct UserItem {
     pub id: String,
     pub name: String,
     pub created_at: String,
+    pub keycloak_sub: Option<String>,
     pub gsi1_pk: String,
     pub gsi1_sk: String,
 }
@@ -23,6 +24,7 @@ impl From<model::user::User> for UserItem {
             id: user.id.clone(),
             name: user.name.clone(),
             created_at: user.created_at,
+            keycloak_sub: user.keycloak_sub,
             gsi1_pk: format!("USERNAME#{}", user.name),
             gsi1_sk: format!("USER#{}", user.id),
         }
@@ -35,6 +37,7 @@ impl From<UserItem> for model::user::User {
             id: item.id,
             name: item.name,
             created_at: item.created_at,
+            keycloak_sub: item.keycloak_sub,
         }
     }
 }

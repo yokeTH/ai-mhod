@@ -24,3 +24,30 @@ pub struct UsageRow {
     pub total_cache_read_tokens: i64,
     pub total_duration_ms: i64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageGraphPoint {
+    pub period: String,
+    pub inputs: i64,
+    pub outputs: i64,
+    pub cache: i64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Granularity {
+    #[serde(rename = "15min")]
+    FifteenMin,
+    #[serde(rename = "30min")]
+    ThirtyMin,
+    #[serde(rename = "1hr")]
+    OneHour,
+    #[serde(rename = "4hr")]
+    FourHours,
+    #[serde(rename = "12hr")]
+    TwelveHours,
+    Daily,
+    Weekly,
+    #[default]
+    Monthly,
+}

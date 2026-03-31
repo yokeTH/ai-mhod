@@ -46,6 +46,7 @@ rand = "0.9"
 async-trait = "0.1"
 anyhow = "1"
 chrono = "0.4"
+jsonwebtoken = "9"
 aws-sdk-dynamodb = "1"
 aws-config = "1"
 serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }

@@ -5,6 +5,7 @@ pub struct User {
     pub id: String,
     pub name: String,
     pub created_at: String,
+    pub keycloak_sub: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
