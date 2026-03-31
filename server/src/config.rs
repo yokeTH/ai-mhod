@@ -4,7 +4,7 @@ use std::env;
 pub struct Config {
     pub port: u16,
     pub upstream_api_key: String,
-    pub allowed_api_keys: Vec<String>,
+    pub db_path: String,
 }
 
 impl Config {
@@ -17,17 +17,12 @@ impl Config {
         let upstream_api_key = env::var("UPSTREAM_API_KEY")
             .expect("UPSTREAM_API_KEY is required");
 
-        let allowed_api_keys: Vec<String> = env::var("ALLOWED_API_KEYS")
-            .expect("ALLOWED_API_KEYS is required (comma-separated)")
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
+        let db_path = env::var("DB_PATH").unwrap_or_else(|_| "mhod.db".to_string());
 
         Self {
             port,
             upstream_api_key,
-            allowed_api_keys,
+            db_path,
         }
     }
 }

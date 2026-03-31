@@ -2,8 +2,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
+use tokio::sync::mpsc;
+
 struct Inner {
     request_id: String,
+    user_id: i64,
     model: String,
     stream: bool,
     start_time: Instant,
@@ -12,6 +15,7 @@ struct Inner {
     cache_read: AtomicU64,
     finished: AtomicBool,
     sse_buffer: std::sync::Mutex<String>,
+    usage_tx: mpsc::Sender<model::usage_log::UsageLog>,
 }
 
 /// Tracks per-request metrics. Cheaply clonable via `Arc`.
@@ -31,10 +35,11 @@ impl Clone for RequestMetrics {
 }
 
 impl RequestMetrics {
-    pub fn new(model: &str, stream: bool) -> Self {
+    pub fn new(model: &str, stream: bool, user_id: i64, usage_tx: mpsc::Sender<model::usage_log::UsageLog>) -> Self {
         Self {
             inner: Arc::new(Inner {
                 request_id: uuid::Uuid::new_v4().to_string(),
+                user_id,
                 model: model.to_string(),
                 stream,
                 start_time: Instant::now(),
@@ -43,6 +48,7 @@ impl RequestMetrics {
                 cache_read: AtomicU64::new(0),
                 finished: AtomicBool::new(false),
                 sse_buffer: std::sync::Mutex::new(String::new()),
+                usage_tx,
             }),
         }
     }
@@ -79,6 +85,15 @@ impl RequestMetrics {
         if self.inner.stream {
             let buf = self.inner.sse_buffer.lock().unwrap();
             let usage = model::anthropic::extract_stream_usage(&buf);
+            if let Some(ref err) = usage.error {
+                tracing::error!(
+                    request_id = %self.inner.request_id,
+                    user_id = self.inner.user_id,
+                    model = %self.inner.model,
+                    error = %err,
+                    "Upstream stream error"
+                );
+            }
             if let Some(v) = usage.input_tokens {
                 self.inner.input.store(v, Ordering::Relaxed);
             }
@@ -93,15 +108,31 @@ impl RequestMetrics {
         let inp = self.inner.input.load(Ordering::Relaxed);
         let out = self.inner.output.load(Ordering::Relaxed);
         let cache = self.inner.cache_read.load(Ordering::Relaxed);
+        let duration_ms = self.inner.start_time.elapsed().as_millis() as u64;
+
         tracing::info!(
             request_id = %self.inner.request_id,
+            user_id = self.inner.user_id,
             model = %self.inner.model,
             stream = self.inner.stream,
-            duration_ms = self.inner.start_time.elapsed().as_millis() as u64,
+            duration_ms = duration_ms,
             input_tokens = if inp > 0 { Some(inp) } else { None },
             output_tokens = if out > 0 { Some(out) } else { None },
             cache_read_input_tokens = if cache > 0 { Some(cache) } else { None },
             "Request completed"
         );
+
+        // Send usage log to the writer task
+        let log = model::usage_log::UsageLog {
+            request_id: self.inner.request_id.clone(),
+            user_id: self.inner.user_id,
+            model: self.inner.model.clone(),
+            stream: self.inner.stream,
+            input_tokens: if inp > 0 { Some(inp) } else { None },
+            output_tokens: if out > 0 { Some(out) } else { None },
+            cache_read_tokens: if cache > 0 { Some(cache) } else { None },
+            duration_ms,
+        };
+        let _ = self.inner.usage_tx.try_send(log);
     }
 }

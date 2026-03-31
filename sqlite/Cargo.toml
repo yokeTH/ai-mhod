@@ -1,0 +1,13 @@
+[package]
+name = "sqlite"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+model.workspace = true
+repository.workspace = true
+rusqlite.workspace = true
+rand.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true

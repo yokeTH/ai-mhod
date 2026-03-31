@@ -11,9 +11,13 @@ use reqwest::Client;
 
 use crate::config::Config;
 
+pub type UsageTx = tokio::sync::mpsc::Sender<model::usage_log::UsageLog>;
+
 pub struct AppInner {
     pub client: Client,
     pub config: Config,
+    pub repo: Box<dyn repository::Repository>,
+    pub usage_tx: UsageTx,
 }
 
 pub type AppState = Arc<AppInner>;
