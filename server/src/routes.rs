@@ -5,7 +5,7 @@ use axum::response::Response;
 use axum::routing::any;
 use axum::Router;
 
-use crate::auth::UserId;
+use crate::auth::KeyInfo;
 use crate::error::ProxyError;
 use crate::metrics::RequestMetrics;
 use crate::proxy::proxy_to;
@@ -19,7 +19,7 @@ pub fn zai_router() -> Router<AppState> {
 /// Proxy handler: /zai/{path} -> https://api.z.ai/{path}
 async fn zai_proxy_handler(
     State(state): State<AppState>,
-    UserId(user_id): UserId,
+    info: KeyInfo,
     Path(path): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -36,11 +36,12 @@ async fn zai_proxy_handler(
         .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(String::from))
         .unwrap_or_default();
 
-    let metrics = RequestMetrics::new(&model, is_stream, user_id, state.usage_tx.clone());
+    let metrics = RequestMetrics::new(&model, is_stream, &info.user_id, &info.api_key_id, state.usage_tx.clone());
 
     tracing::info!(
         request_id = %metrics.request_id(),
-        user_id = user_id,
+        user_id = %info.user_id,
+        api_key_id = %info.api_key_id,
         model = %model,
         stream = is_stream,
         upstream = %url,

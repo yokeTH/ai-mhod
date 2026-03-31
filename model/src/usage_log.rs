@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageLog {
     pub request_id: String,
-    pub user_id: i64,
+    pub user_id: String,
+    pub api_key_id: String,
     pub model: String,
     pub stream: bool,
     pub input_tokens: Option<u64>,
@@ -14,8 +15,9 @@ pub struct UsageLog {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageRow {
-    pub user_name: String,
+    pub user_id: String,
     pub model: String,
+    pub api_key_id: Option<String>,
     pub total_requests: i64,
     pub total_input_tokens: i64,
     pub total_output_tokens: i64,

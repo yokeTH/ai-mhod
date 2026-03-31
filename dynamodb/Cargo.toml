@@ -1,13 +1,18 @@
 [package]
-name = "sqlite"
+name = "dynamodb"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 model.workspace = true
 repository.workspace = true
-rusqlite.workspace = true
+aws-sdk-dynamodb.workspace = true
+serde.workspace = true
+serde_dynamo.workspace = true
 rand.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+uuid.workspace = true

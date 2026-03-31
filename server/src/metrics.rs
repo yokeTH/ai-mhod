@@ -6,7 +6,8 @@ use tokio::sync::mpsc;
 
 struct Inner {
     request_id: String,
-    user_id: i64,
+    user_id: String,
+    api_key_id: String,
     model: String,
     stream: bool,
     start_time: Instant,
@@ -35,11 +36,12 @@ impl Clone for RequestMetrics {
 }
 
 impl RequestMetrics {
-    pub fn new(model: &str, stream: bool, user_id: i64, usage_tx: mpsc::Sender<model::usage_log::UsageLog>) -> Self {
+    pub fn new(model: &str, stream: bool, user_id: &str, api_key_id: &str, usage_tx: mpsc::Sender<model::usage_log::UsageLog>) -> Self {
         Self {
             inner: Arc::new(Inner {
                 request_id: uuid::Uuid::new_v4().to_string(),
-                user_id,
+                user_id: user_id.to_string(),
+                api_key_id: api_key_id.to_string(),
                 model: model.to_string(),
                 stream,
                 start_time: Instant::now(),
@@ -88,7 +90,7 @@ impl RequestMetrics {
             if let Some(ref err) = usage.error {
                 tracing::error!(
                     request_id = %self.inner.request_id,
-                    user_id = self.inner.user_id,
+                    user_id = %self.inner.user_id,
                     model = %self.inner.model,
                     error = %err,
                     "Upstream stream error"
@@ -112,7 +114,7 @@ impl RequestMetrics {
 
         tracing::info!(
             request_id = %self.inner.request_id,
-            user_id = self.inner.user_id,
+            user_id = %self.inner.user_id,
             model = %self.inner.model,
             stream = self.inner.stream,
             duration_ms = duration_ms,
@@ -125,7 +127,8 @@ impl RequestMetrics {
         // Send usage log to the writer task
         let log = model::usage_log::UsageLog {
             request_id: self.inner.request_id.clone(),
-            user_id: self.inner.user_id,
+            user_id: self.inner.user_id.clone(),
+            api_key_id: self.inner.api_key_id.clone(),
             model: self.inner.model.clone(),
             stream: self.inner.stream,
             input_tokens: if inp > 0 { Some(inp) } else { None },

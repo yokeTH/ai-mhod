@@ -4,7 +4,7 @@ use std::env;
 pub struct Config {
     pub port: u16,
     pub upstream_api_key: String,
-    pub db_path: String,
+    pub table_name: String,
 }
 
 impl Config {
@@ -17,12 +17,12 @@ impl Config {
         let upstream_api_key = env::var("UPSTREAM_API_KEY")
             .expect("UPSTREAM_API_KEY is required");
 
-        let db_path = env::var("DB_PATH").unwrap_or_else(|_| "mhod.db".to_string());
+        let table_name = env::var("TABLE_NAME").unwrap_or_else(|_| "mhod".to_string());
 
         Self {
             port,
             upstream_api_key,
-            db_path,
+            table_name,
         }
     }
 }

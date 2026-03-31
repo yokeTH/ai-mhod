@@ -8,7 +8,7 @@ use crate::error::ProxyError;
 use crate::AppState;
 
 /// Middleware that validates the API key from either `x-api-key` or `Authorization: Bearer` headers.
-/// Looks up the key in the database and stores the user_id in request extensions.
+/// Looks up the key in the database and stores KeyInfo (user_id + api_key) in request extensions.
 pub async fn require_api_key(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -27,7 +27,7 @@ pub async fn require_api_key(
         })
         .ok_or(ProxyError::Unauthorized)?;
 
-    let user_id = state
+    let (user_id, api_key_id) = state
         .repo
         .lookup_key(&key)
         .await
@@ -37,15 +37,18 @@ pub async fn require_api_key(
         })?
         .ok_or(ProxyError::Unauthorized)?;
 
-    request.extensions_mut().insert(UserId(user_id));
+    request.extensions_mut().insert(KeyInfo { user_id, api_key_id });
     Ok(next.run(request).await)
 }
 
-/// Extracted user ID stored in request extensions.
-#[derive(Clone, Copy, Debug)]
-pub struct UserId(pub i64);
+/// Extracted key info stored in request extensions.
+#[derive(Clone, Debug)]
+pub struct KeyInfo {
+    pub user_id: String,
+    pub api_key_id: String,
+}
 
-impl FromRequestParts<AppState> for UserId {
+impl FromRequestParts<AppState> for KeyInfo {
     type Rejection = ProxyError;
 
     async fn from_request_parts(
@@ -54,8 +57,8 @@ impl FromRequestParts<AppState> for UserId {
     ) -> Result<Self, Self::Rejection> {
         parts
             .extensions
-            .get::<UserId>()
-            .copied()
+            .get::<KeyInfo>()
+            .cloned()
             .ok_or(ProxyError::Unauthorized)
     }
 }

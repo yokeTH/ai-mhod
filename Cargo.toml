@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 server.workspace = true
-sqlite.workspace = true
+dynamodb.workspace = true
 repository.workspace = true
 model.workspace = true
 axum.workspace = true
@@ -15,13 +15,15 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 dotenvy.workspace = true
 clap.workspace = true
+aws-config.workspace = true
+aws-sdk-dynamodb.workspace = true
 
 [[bin]]
 name = "mhod"
 path = "src/main.rs"
 
 [workspace]
-members = ["server", "model", "repository", "sqlite"]
+members = ["server", "model", "repository", "dynamodb"]
 resolver = "3"
 
 [workspace.package]
@@ -40,14 +42,17 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 dotenvy = "0.15"
 clap = { version = "4", features = ["derive"] }
-rusqlite = { version = "0.34", features = ["bundled"] }
 rand = "0.9"
 async-trait = "0.1"
 anyhow = "1"
+chrono = "0.4"
+aws-sdk-dynamodb = "1"
+aws-config = "1"
+serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }
 model = { path = "model" }
 server = { path = "server" }
 repository = { path = "repository" }
-sqlite = { path = "sqlite" }
+dynamodb = { path = "dynamodb" }
 
 [profile.release]
 opt-level = 3
