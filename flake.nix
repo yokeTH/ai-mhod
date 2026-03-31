@@ -16,6 +16,7 @@
         overlays = [(import rust-overlay)];
         pkgs = import nixpkgs {
           inherit system overlays;
+          config.allowUnfree = true;
         };
 
         rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
@@ -25,6 +26,9 @@
           buildInputs = [
             rustToolchain
             pkgs.taplo
+
+            pkgs.terraform
+            pkgs.awscli2
           ];
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
