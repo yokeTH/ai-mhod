@@ -3,7 +3,7 @@ FROM --platform=$BUILDPLATFORM rust:1-slim-bookworm AS builder
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    musl-tools musl-dev clang llvm lld wget \
+    musl-tools musl-dev clang llvm lld wget ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install musl cross toolchain
@@ -29,14 +29,14 @@ COPY Cargo.toml Cargo.lock ./
 COPY model/Cargo.toml model/Cargo.toml
 COPY repository/Cargo.toml repository/Cargo.toml
 COPY server/Cargo.toml server/Cargo.toml
-COPY sqlite/Cargo.toml sqlite/Cargo.toml
+COPY dynamodb/Cargo.toml dynamodb/Cargo.toml
 
 # Copy source
 COPY src src
 COPY model/src model/src
 COPY repository/src repository/src
 COPY server/src server/src
-COPY sqlite/src sqlite/src
+COPY dynamodb/src dynamodb/src
 
 ENV RUSTFLAGS="-C target-feature=+crt-static"
 
@@ -59,13 +59,11 @@ RUN case "$TARGETARCH" in \
     cargo build --release --target "$CARGO_TARGET" && \
     cp "/app/target/$CARGO_TARGET/release/mhod" /mhod
 
-FROM litestream/litestream:0.5.9
-
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+FROM scratch
 
 COPY --from=builder /mhod /mhod
-COPY litestream.yml /etc/litestream.yml
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 EXPOSE 8080
 
-ENTRYPOINT ["/bin/sh", "-c", "litestream restore -if-replica-exists /data/mhod.db && exec litestream replicate -exec '/mhod serve'"]
+ENTRYPOINT ["/mhod", "serve"]
