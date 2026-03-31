@@ -2,11 +2,11 @@ mod config;
 
 use std::sync::Arc;
 
-use axum::routing::get;
 use axum::Router;
+use axum::routing::get;
 use clap::Parser;
-use reqwest::Client;
 use repository::Repository;
+use reqwest::Client;
 use server::routes;
 use server::{AppInner, AppState};
 use tracing_subscriber::EnvFilter;
@@ -118,8 +118,10 @@ async fn run_server() {
     });
     let port = state.config.port;
 
-    let zai_routes = routes::zai_router()
-        .layer(axum::middleware::from_fn_with_state(state.clone(), server::auth::require_api_key));
+    let zai_routes = routes::zai_router().layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        server::auth::require_api_key,
+    ));
 
     let app = Router::new()
         .nest("/zai", zai_routes)
@@ -131,7 +133,10 @@ async fn run_server() {
         .expect("failed to bind");
 
     tracing::info!("Listening on port {port}");
-    axum::serve(listener, app).await.expect("server error");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("server error");
 }
 
 async fn run_user_cmd(cmd: UserCmd) {
@@ -183,7 +188,10 @@ async fn run_key_cmd(cmd: KeyCmd) {
                 eprintln!("user '{user}' not found");
                 std::process::exit(1);
             }
-            let keys = db.list_keys(&user_id.unwrap()).await.expect("failed to list keys");
+            let keys = db
+                .list_keys(&user_id.unwrap())
+                .await
+                .expect("failed to list keys");
             if keys.is_empty() {
                 println!("No keys found for user '{user}'.");
                 return;
@@ -212,7 +220,14 @@ async fn run_usage(user: Option<String>, key: Option<String>) {
 
     println!(
         "{:<15} {:<30} {:<40} {:>8} {:>12} {:>12} {:>12} {:>12}",
-        "User", "Model", "API Key ID", "Requests", "Input Tok", "Output Tok", "Cache Read", "Duration ms"
+        "User",
+        "Model",
+        "API Key ID",
+        "Requests",
+        "Input Tok",
+        "Output Tok",
+        "Cache Read",
+        "Duration ms"
     );
     for r in rows {
         let api_key_id = r.api_key_id.unwrap_or_else(|| "-".to_string());
@@ -227,5 +242,27 @@ async fn run_usage(user: Option<String>, key: Option<String>) {
             r.total_cache_read_tokens,
             r.total_duration_ms
         );
+    }
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::{
+            select,
+            signal::unix::{SignalKind, signal},
+        };
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+        let mut sigint = signal(SignalKind::interrupt()).expect("failed to install SIGINT handler");
+        select! {
+            _ = sigterm.recv() => {},
+            _ = sigint.recv()  => {},
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
     }
 }
