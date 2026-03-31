@@ -16,6 +16,8 @@ pub fn zai_router() -> Router<AppState> {
     Router::new().route("/{*wildcard}", any(zai_proxy_handler))
 }
 
+const ALLOWED_ENDPOINTS: &[&str] = &["api/anthropic"];
+
 /// Proxy handler: /zai/{path} -> https://api.z.ai/{path}
 async fn zai_proxy_handler(
     State(state): State<AppState>,
@@ -24,6 +26,10 @@ async fn zai_proxy_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ProxyError> {
+    if !ALLOWED_ENDPOINTS.iter().any(|ep| path.starts_with(ep)) {
+        return Err(ProxyError::UpstreamError(format!("path not allowed: {path}")));
+    }
+
     let url = format!("https://api.z.ai/{path}");
 
     let is_stream = serde_json::from_slice::<serde_json::Value>(&body)
