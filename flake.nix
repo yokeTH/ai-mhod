@@ -29,6 +29,9 @@
 
             pkgs.terraform
             pkgs.awscli2
+
+            pkgs.nodejs_24
+            pkgs.pnpm
           ];
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
