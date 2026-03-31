@@ -11,6 +11,7 @@ pub struct KeyItem {
     pub key: String,
     pub name: Option<String>,
     pub created_at: String,
+    pub revoked: Option<bool>,
     pub gsi1_pk: String,
     pub gsi1_sk: String,
     pub gsi2_pk: String,
@@ -29,6 +30,7 @@ impl From<model::user::ApiKey> for KeyItem {
             key: api_key.key.clone(),
             name: api_key.name,
             created_at: api_key.created_at,
+            revoked: Some(api_key.revoked),
             gsi1_pk: format!("USER#{}", api_key.user_id),
             gsi1_sk: format!("KEY#{}", api_key.id),
             gsi2_pk: format!("KEYVAL#{}", api_key.key),
@@ -45,6 +47,7 @@ impl From<KeyItem> for model::user::ApiKey {
             key: item.key,
             name: item.name,
             created_at: item.created_at,
+            revoked: item.revoked.unwrap_or(true),
         }
     }
 }

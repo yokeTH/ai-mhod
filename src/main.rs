@@ -65,6 +65,11 @@ enum KeyCmd {
         /// User name
         user: String,
     },
+    /// Revoke an API key
+    Revoke {
+        /// Key ID
+        key_id: String,
+    },
 }
 
 #[tokio::main]
@@ -196,11 +201,18 @@ async fn run_key_cmd(cmd: KeyCmd) {
                 println!("No keys found for user '{user}'.");
                 return;
             }
-            println!("{:<40} {:<15} Created", "Key", "Name");
+            println!("{:<40} {:<15} {:<8} Created", "Key", "Name", "Revoked");
             for k in keys {
                 let name = k.name.unwrap_or_default();
-                println!("{:<40} {:<15} {}", k.key, name, k.created_at);
+                let revoked = if k.revoked { "yes" } else { "no" };
+                println!("{:<40} {:<15} {:<8} {}", k.key, name, revoked, k.created_at);
             }
+        }
+        KeyCmd::Revoke { key_id } => {
+            db.revoke_key(&key_id)
+                .await
+                .expect("failed to revoke key");
+            println!("Key '{key_id}' revoked.");
         }
     }
 }

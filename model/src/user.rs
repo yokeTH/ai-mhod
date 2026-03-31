@@ -14,4 +14,5 @@ pub struct ApiKey {
     pub key: String,
     pub name: Option<String>,
     pub created_at: String,
+    pub revoked: bool,
 }

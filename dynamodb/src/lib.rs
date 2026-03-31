@@ -122,6 +122,7 @@ impl Repository for DynamoDbRepo {
             key: key.clone(),
             name: name.map(|s| s.to_string()),
             created_at: now,
+            revoked: false,
         };
         let item: HashMap<String, AttributeValue> = serde_dynamo::to_item(KeyItem::from(api_key))?;
 
@@ -159,7 +160,7 @@ impl Repository for DynamoDbRepo {
         Ok(keys)
     }
 
-    async fn lookup_key(&self, key: &str) -> anyhow::Result<Option<(String, String)>> {
+    async fn lookup_key(&self, key: &str) -> anyhow::Result<Option<(String, String, bool)>> {
         let gsi2_pk = format!("KEYVAL#{key}");
 
         let resp = self
@@ -176,10 +177,29 @@ impl Repository for DynamoDbRepo {
         match resp.items().first() {
             Some(item) => {
                 let key_item: KeyItem = serde_dynamo::from_item(item.clone())?;
-                Ok(Some((key_item.user_id, key_item.id)))
+                Ok(Some((key_item.user_id, key_item.id, key_item.revoked.unwrap_or(true))))
             }
             None => Ok(None),
         }
+    }
+
+    async fn revoke_key(&self, key_id: &str) -> anyhow::Result<()> {
+        let pk = format!("KEY#{key_id}");
+
+        self.client
+            .update_item()
+            .table_name(&self.table_name)
+            .key("pk", Self::s(&pk))
+            .key("sk", Self::s(&pk))
+            .update_expression("SET revoked = :revoked")
+            .expression_attribute_values(":revoked", AttributeValue::Bool(true))
+            .condition_expression("attribute_exists(pk) AND #t = :key_type")
+            .expression_attribute_names("#t", "type")
+            .expression_attribute_values(":key_type", Self::s("KEY"))
+            .send()
+            .await?;
+
+        Ok(())
     }
 
     async fn insert_usage_log(&self, log: &model::usage_log::UsageLog) -> anyhow::Result<()> {
