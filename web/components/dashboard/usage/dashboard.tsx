@@ -152,7 +152,7 @@ export function UsageDashboard({ points, shared, models }: { points: UsageGraphP
         </Select>
 
         {models.length > 0 && (
-          <Select value={selectedModel} onValueChange={(v) => setParams({ model: v || null })}>
+          <Select value={selectedModel || "all"} onValueChange={(v) => setParams({ model: v === "all" ? null : v })}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="All Models" />
             </SelectTrigger>
