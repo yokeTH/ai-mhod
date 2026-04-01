@@ -54,6 +54,7 @@ pub enum Granularity {
     #[serde(rename = "30min")]
     ThirtyMin,
     #[serde(rename = "1hr")]
+    #[default]
     OneHour,
     #[serde(rename = "4hr")]
     FourHours,
@@ -61,6 +62,5 @@ pub enum Granularity {
     TwelveHours,
     Daily,
     Weekly,
-    #[default]
     Monthly,
 }

@@ -35,11 +35,11 @@ async fn usage_graph_handler(
     axum::extract::Query(params): axum::extract::Query<UsageGraphQuery>,
 ) -> Result<ApiResponse<model::usage_log::UsageGraphResponse>, ProxyError> {
     let today = chrono::Utc::now().date_naive();
-    let yesterday = today - chrono::Duration::days(1);
+    let seven_days_ago = today - chrono::Duration::days(7);
 
     let from = match params.from.as_deref() {
         Some(v) => parse_iso_date(v)?,
-        None => yesterday.and_hms_opt(0, 0, 0).unwrap().and_utc(),
+        None => seven_days_ago.and_hms_opt(0, 0, 0).unwrap().and_utc(),
     };
 
     let to = match params.to.as_deref() {
@@ -51,27 +51,28 @@ async fn usage_graph_handler(
 
     let points = state
         .repo
-        .usage_graph(&user.user_id, from, to, granularity, params.model.as_deref())
+        .usage_graph(&user.user_id, from, to, granularity.clone(), params.model.as_deref())
         .await
         .map_err(|e| ProxyError::UpstreamError(format!("failed to query usage graph: {e}")))?;
 
-    let total_inputs: i64 = points.iter().map(|p| p.inputs).sum();
-    let total_outputs: i64 = points.iter().map(|p| p.outputs).sum();
-    let total_cache: i64 = points.iter().map(|p| p.cache).sum();
-    let total = total_inputs + total_outputs + total_cache;
+    let total_points = state
+        .repo
+        .usage_graph_total(from, to, granularity, params.model.as_deref())
+        .await
+        .map_err(|e| ProxyError::UpstreamError(format!("failed to query total usage: {e}")))?;
 
-    let shared = if total > 0 {
-        model::usage_log::UsageShared {
-            inputs: (total_inputs as f64 / total as f64) * 100.0,
-            outputs: (total_outputs as f64 / total as f64) * 100.0,
-            cache: (total_cache as f64 / total as f64) * 100.0,
-        }
-    } else {
-        model::usage_log::UsageShared {
-            inputs: 0.0,
-            outputs: 0.0,
-            cache: 0.0,
-        }
+    let user_inputs: i64 = points.iter().map(|p| p.inputs).sum();
+    let user_outputs: i64 = points.iter().map(|p| p.outputs).sum();
+    let user_cache: i64 = points.iter().map(|p| p.cache).sum();
+
+    let all_inputs: i64 = total_points.iter().map(|p| p.inputs).sum();
+    let all_outputs: i64 = total_points.iter().map(|p| p.outputs).sum();
+    let all_cache: i64 = total_points.iter().map(|p| p.cache).sum();
+
+    let shared = model::usage_log::UsageShared {
+        inputs: if all_inputs > 0 { (user_inputs as f64 / all_inputs as f64) * 100.0 } else { 0.0 },
+        outputs: if all_outputs > 0 { (user_outputs as f64 / all_outputs as f64) * 100.0 } else { 0.0 },
+        cache: if all_cache > 0 { (user_cache as f64 / all_cache as f64) * 100.0 } else { 0.0 },
     };
 
     Ok(ApiResponse::ok(model::usage_log::UsageGraphResponse {

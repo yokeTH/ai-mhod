@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use aws_sdk_dynamodb::types::{AttributeValue, Select};
 use aws_sdk_dynamodb::Client;
-use chrono::{Datelike, Timelike, Utc};
+use chrono::{Datelike, Duration, Timelike, Utc};
 use items::{KeyItem, UsageLogItem, UserItem};
 use rand::Rng;
 use repository::Repository;
@@ -28,6 +28,80 @@ impl DynamoDbRepo {
     fn s(val: &str) -> AttributeValue {
         AttributeValue::S(val.to_string())
     }
+}
+
+fn align_down(dt: chrono::DateTime<chrono::Utc>, granularity: &model::usage_log::Granularity) -> chrono::DateTime<chrono::Utc> {
+    match granularity {
+        model::usage_log::Granularity::FifteenMin => {
+            let slot = (dt.minute() / 15) * 15;
+            dt.with_second(0).unwrap().with_minute(slot).unwrap()
+        }
+        model::usage_log::Granularity::ThirtyMin => {
+            let slot = (dt.minute() / 30) * 30;
+            dt.with_second(0).unwrap().with_minute(slot).unwrap()
+        }
+        model::usage_log::Granularity::OneHour => {
+            dt.with_second(0).unwrap().with_minute(0).unwrap()
+        }
+        model::usage_log::Granularity::FourHours => {
+            let slot = (dt.hour() / 4) * 4;
+            dt.with_second(0).unwrap().with_minute(0).unwrap().with_hour(slot).unwrap()
+        }
+        model::usage_log::Granularity::TwelveHours => {
+            let slot = (dt.hour() / 12) * 12;
+            dt.with_second(0).unwrap().with_minute(0).unwrap().with_hour(slot).unwrap()
+        }
+        model::usage_log::Granularity::Daily => {
+            dt.with_second(0).unwrap().with_minute(0).unwrap().with_hour(0).unwrap()
+        }
+        model::usage_log::Granularity::Weekly => {
+            let weekday = dt.weekday().num_days_from_monday();
+            dt.with_second(0).unwrap()
+                .with_minute(0).unwrap()
+                .with_hour(0).unwrap()
+                - Duration::days(weekday as i64)
+        }
+        model::usage_log::Granularity::Monthly => {
+            dt.with_second(0).unwrap()
+                .with_minute(0).unwrap()
+                .with_hour(0).unwrap()
+                .with_day(1).unwrap()
+        }
+    }
+}
+
+fn step_period(dt: chrono::DateTime<chrono::Utc>, granularity: &model::usage_log::Granularity) -> Option<chrono::DateTime<chrono::Utc>> {
+    use model::usage_log::Granularity;
+    match granularity {
+        Granularity::FifteenMin => dt.checked_add_signed(Duration::minutes(15)),
+        Granularity::ThirtyMin => dt.checked_add_signed(Duration::minutes(30)),
+        Granularity::OneHour => dt.checked_add_signed(Duration::hours(1)),
+        Granularity::FourHours => dt.checked_add_signed(Duration::hours(4)),
+        Granularity::TwelveHours => dt.checked_add_signed(Duration::hours(12)),
+        Granularity::Daily => dt.checked_add_signed(Duration::days(1)),
+        Granularity::Weekly => dt.checked_add_signed(Duration::weeks(1)),
+        Granularity::Monthly => {
+            let (new_year, new_month) = if dt.month() == 12 {
+                (dt.year() + 1, 1u32)
+            } else {
+                (dt.year(), dt.month() + 1)
+            };
+            dt.with_year(new_year)?.with_month(new_month)
+        }
+    }
+}
+
+fn generate_periods(from: chrono::DateTime<chrono::Utc>, to: chrono::DateTime<chrono::Utc>, granularity: &model::usage_log::Granularity) -> Vec<String> {
+    let mut periods = Vec::new();
+    let mut current = align_down(from, granularity);
+    while current <= to {
+        periods.push(current.format("%Y-%m-%dT%H:%M:%SZ").to_string());
+        current = match step_period(current, granularity) {
+            Some(next) => next,
+            None => break,
+        };
+    }
+    periods
 }
 
 #[async_trait]
@@ -358,9 +432,10 @@ impl Repository for DynamoDbRepo {
                 .client
                 .query()
                 .table_name(&self.table_name)
-                .key_condition_expression("pk = :pk AND begins_with(sk, :prefix)")
+                .key_condition_expression("pk = :pk AND sk BETWEEN :from_sk AND :to_sk")
                 .expression_attribute_values(":pk", Self::s(&pk))
-                .expression_attribute_values(":prefix", Self::s("LOG#"));
+                .expression_attribute_values(":from_sk", Self::s(&format!("LOG#{}", from.to_rfc3339())))
+                .expression_attribute_values(":to_sk", Self::s(&format!("LOG#{}", to.to_rfc3339())));
 
             if let Some(key) = exclusive_start_key.take() {
                 q = q.set_exclusive_start_key(Some(key));
@@ -389,45 +464,14 @@ impl Repository for DynamoDbRepo {
 
             let Some(created) = created else { continue };
 
-            if created < from || created > to {
-                continue;
-            }
-
             if let Some(m) = model_filter
                 && log_item.model != m
             {
                 continue;
             }
 
-            let period_key = match granularity {
-                model::usage_log::Granularity::FifteenMin => {
-                    let mins = created.minute();
-                    let slot = (mins / 15) * 15;
-                    format!("{}:{:02}", created.format("%Y-%m-%dT%H"), slot)
-                }
-                model::usage_log::Granularity::ThirtyMin => {
-                    let mins = created.minute();
-                    let slot = (mins / 30) * 30;
-                    format!("{}:{:02}", created.format("%Y-%m-%dT%H"), slot)
-                }
-                model::usage_log::Granularity::OneHour => {
-                    created.format("%Y-%m-%dT%H:00").to_string()
-                }
-                model::usage_log::Granularity::FourHours => {
-                    let slot = (created.hour() / 4) * 4;
-                    format!("{}T{:02}:00", created.format("%Y-%m-%d"), slot)
-                }
-                model::usage_log::Granularity::TwelveHours => {
-                    let slot = (created.hour() / 12) * 12;
-                    format!("{}T{:02}:00", created.format("%Y-%m-%d"), slot)
-                }
-                model::usage_log::Granularity::Daily => created.format("%Y-%m-%d").to_string(),
-                model::usage_log::Granularity::Weekly => {
-                    let week = created.iso_week();
-                    format!("{}-W{:02}", week.year(), week.week())
-                }
-                model::usage_log::Granularity::Monthly => created.format("%B %Y").to_string(),
-            };
+            let aligned = align_down(created, &granularity);
+            let period_key = aligned.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
             let entry = buckets.entry(period_key).or_insert((0, 0, 0));
             entry.0 += log_item.input_tokens.unwrap_or(0) as i64;
@@ -435,13 +479,93 @@ impl Repository for DynamoDbRepo {
             entry.2 += log_item.cache_read_tokens.unwrap_or(0) as i64;
         }
 
-        Ok(buckets
+        let periods = generate_periods(from, to, &granularity);
+        Ok(periods
             .into_iter()
-            .map(|(period, (inputs, outputs, cache))| model::usage_log::UsageGraphPoint {
-                period,
-                inputs,
-                outputs,
-                cache,
+            .map(|period| {
+                let (inputs, outputs, cache) = buckets.remove(&period).unwrap_or((0, 0, 0));
+                model::usage_log::UsageGraphPoint {
+                    period,
+                    inputs,
+                    outputs,
+                    cache,
+                }
+            })
+            .collect())
+    }
+
+    async fn usage_graph_total(
+        &self,
+        from: chrono::DateTime<chrono::Utc>,
+        to: chrono::DateTime<chrono::Utc>,
+        granularity: model::usage_log::Granularity,
+        model_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<model::usage_log::UsageGraphPoint>> {
+        let users = self.list_users().await?;
+        let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64)> = std::collections::BTreeMap::new();
+
+        for user in &users {
+            let pk = format!("USER#{}", user.id);
+            let mut exclusive_start_key: Option<HashMap<String, AttributeValue>> = None;
+
+            loop {
+                let mut q = self
+                    .client
+                    .query()
+                    .table_name(&self.table_name)
+                    .key_condition_expression("pk = :pk AND sk BETWEEN :from_sk AND :to_sk")
+                    .expression_attribute_values(":pk", Self::s(&pk))
+                    .expression_attribute_values(":from_sk", Self::s(&format!("LOG#{}", from.to_rfc3339())))
+                    .expression_attribute_values(":to_sk", Self::s(&format!("LOG#{}", to.to_rfc3339())));
+
+                if let Some(key) = exclusive_start_key.take() {
+                    q = q.set_exclusive_start_key(Some(key));
+                }
+
+                let resp = q.send().await?;
+
+                for item in resp.items() {
+                    let log_item: UsageLogItem = serde_dynamo::from_item(item.clone())?;
+
+                    let created = chrono::DateTime::parse_from_rfc3339(&log_item.created_at)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .ok();
+
+                    let Some(created) = created else { continue };
+
+                    if let Some(m) = model_filter
+                        && log_item.model != m
+                    {
+                        continue;
+                    }
+
+                    let aligned = align_down(created, &granularity);
+                    let period_key = aligned.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+                    let entry = buckets.entry(period_key).or_insert((0, 0, 0));
+                    entry.0 += log_item.input_tokens.unwrap_or(0) as i64;
+                    entry.1 += log_item.output_tokens.unwrap_or(0) as i64;
+                    entry.2 += log_item.cache_read_tokens.unwrap_or(0) as i64;
+                }
+
+                if resp.last_evaluated_key().is_none() {
+                    break;
+                }
+                exclusive_start_key = resp.last_evaluated_key().cloned();
+            }
+        }
+
+        let periods = generate_periods(from, to, &granularity);
+        Ok(periods
+            .into_iter()
+            .map(|period| {
+                let (inputs, outputs, cache) = buckets.remove(&period).unwrap_or((0, 0, 0));
+                model::usage_log::UsageGraphPoint {
+                    period,
+                    inputs,
+                    outputs,
+                    cache,
+                }
             })
             .collect())
     }

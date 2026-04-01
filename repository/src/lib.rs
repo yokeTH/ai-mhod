@@ -27,5 +27,13 @@ pub trait Repository: Send + Sync {
         model_filter: Option<&str>,
     ) -> anyhow::Result<Vec<model::usage_log::UsageGraphPoint>>;
 
+    async fn usage_graph_total(
+        &self,
+        from: chrono::DateTime<chrono::Utc>,
+        to: chrono::DateTime<chrono::Utc>,
+        granularity: Granularity,
+        model_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<model::usage_log::UsageGraphPoint>>;
+
     async fn list_models(&self, user_id: &str) -> anyhow::Result<Vec<String>>;
 }
