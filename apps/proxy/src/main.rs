@@ -4,6 +4,7 @@ pub mod dto;
 mod metrics;
 mod proxy;
 mod routes;
+mod token;
 
 use std::sync::Arc;
 
@@ -22,6 +23,7 @@ pub struct AppInner {
     pub config: Config,
     pub repo: Box<dyn repository::Repository>,
     pub usage_tx: UsageTx,
+    pub redis: Option<redis::aio::ConnectionManager>,
 }
 
 pub type AppState = Arc<AppInner>;
@@ -51,8 +53,7 @@ async fn run_server() {
 
     let (usage_tx, mut usage_rx) = tokio::sync::mpsc::channel::<model::usage_log::UsageLog>(256);
 
-    let writer_repo = dynamodb::DynamoDbRepo::from_env().await;
-
+    let writer_repo = repo.clone();
     tokio::spawn(async move {
         while let Some(log) = usage_rx.recv().await {
             if let Err(e) = writer_repo.insert_usage_log(&log).await {
@@ -61,11 +62,29 @@ async fn run_server() {
         }
     });
 
+    let redis_conn = match redis::Client::open(&*cfg.redis_url) {
+        Ok(redis_client) => match redis_client.get_connection_manager().await {
+            Ok(conn) => {
+                tracing::info!("Connected to Redis");
+                Some(conn)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to connect to Redis, /anthropic/* routes will be unavailable");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "Invalid Redis URL, /anthropic/* routes will be unavailable");
+            None
+        }
+    };
+
     let state: AppState = Arc::new(AppInner {
         client,
         config: cfg.clone(),
         repo: Box::new(repo),
         usage_tx,
+        redis: redis_conn,
     });
     let port = state.config.port;
 
@@ -74,8 +93,15 @@ async fn run_server() {
         auth::require_api_key,
     ));
 
+    let anthropic_routes = routes::anthropic::anthropic_router()
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_api_key,
+        ));
+
     let app = Router::new()
         .nest("/zai", zai_routes)
+        .nest("/anthropic", anthropic_routes)
         .route("/health", get(routes::zai::health))
         .with_state(state);
 

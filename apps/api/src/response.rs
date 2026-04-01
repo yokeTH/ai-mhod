@@ -3,7 +3,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
-pub struct ApiResponse<T: Serialize> {
+pub struct ApiResponse<T> {
     pub data: T,
     pub pagination: Option<Pagination>,
 }

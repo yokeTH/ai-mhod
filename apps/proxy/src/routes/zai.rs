@@ -7,8 +7,8 @@ use axum::routing::any;
 
 use crate::AppState;
 use crate::auth::KeyInfo;
-use crate::metrics::RequestMetrics;
-use crate::proxy::proxy_to;
+use crate::proxy::UpstreamAuth;
+use crate::routes::common::{ProxyConfig, handle_proxy};
 use error::ProxyError;
 
 /// Router for /zai/* -> https://api.z.ai/*
@@ -18,7 +18,6 @@ pub fn zai_router() -> Router<AppState> {
 
 const ALLOWED_ENDPOINTS: &[&str] = &["api/anthropic"];
 
-/// Proxy handler: /zai/{path} -> https://api.z.ai/{path}
 async fn zai_proxy_handler(
     State(state): State<AppState>,
     info: KeyInfo,
@@ -26,57 +25,21 @@ async fn zai_proxy_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ProxyError> {
-    if !ALLOWED_ENDPOINTS.iter().any(|ep| path.starts_with(ep)) {
-        return Err(ProxyError::UpstreamError(format!(
-            "path not allowed: {path}"
-        )));
-    }
-
-    let url = format!("https://api.z.ai/{path}");
-
-    let body_json = serde_json::from_slice::<serde_json::Value>(&body).ok();
-    let is_stream = body_json
-        .as_ref()
-        .and_then(|v| v.get("stream").and_then(|s| s.as_bool()))
-        .unwrap_or(false);
-
-    let model = body_json
-        .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(String::from))
-        .unwrap_or_default();
-
-    let metrics = RequestMetrics::new(
-        &model,
-        is_stream,
-        &info.user_id,
-        &info.api_key_id,
-        state.usage_tx.clone(),
-    );
-
-    tracing::info!(
-        request_id = %metrics.request_id(),
-        user_id = %info.user_id,
-        api_key_id = %info.api_key_id,
-        model = %model,
-        stream = is_stream,
-        upstream = %url,
-        "Incoming request"
-    );
-
-    let result = proxy_to(&state, &url, &headers, body, is_stream, &metrics).await;
-
-    match &result {
-        Ok(_) => {
-            // For non-streaming responses, finish metrics here.
-            // For streaming, the stream terminator in proxy.rs calls finish()
-            // after all SSE chunks are consumed.
-            if !is_stream {
-                metrics.finish();
-            }
-        }
-        Err(e) => tracing::error!(request_id = %metrics.request_id(), error = %e, "Request failed"),
-    }
-
-    result
+    handle_proxy(
+        &state,
+        &info,
+        &path,
+        headers,
+        body,
+        ProxyConfig {
+            allowed_endpoints: ALLOWED_ENDPOINTS,
+            upstream_base: "https://api.z.ai",
+            auth: UpstreamAuth::ApiKey(state.config.upstream_api_key.clone()),
+            log_label: "zai",
+            extra_headers: None,
+        },
+    )
+    .await
 }
 
 /// Health check endpoint.

@@ -208,6 +208,8 @@ pub enum ProxyError {
     UpstreamError(String),
     #[error("{0}")]
     BadRequest(String),
+    #[error("failed to obtain upstream auth token: {0}")]
+    TokenError(String),
 }
 
 impl IntoResponse for ProxyError {
@@ -216,6 +218,7 @@ impl IntoResponse for ProxyError {
             ProxyError::Unauthorized => (StatusCode::UNAUTHORIZED, self.to_string()),
             ProxyError::UpstreamError(msg) => (StatusCode::BAD_GATEWAY, msg.clone()),
             ProxyError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+            ProxyError::TokenError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };
 
         tracing::warn!(error = %self, "Request failed");

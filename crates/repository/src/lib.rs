@@ -1,6 +1,19 @@
 use model::usage_log::{Granularity, UsageLog, UsageRow};
 use model::user::{ApiKey, User};
 
+/// Result of creating a new API key.
+pub struct CreatedKey {
+    pub id: String,
+    pub key: String,
+}
+
+/// Result of looking up an API key by value.
+pub struct KeyLookup {
+    pub user_id: String,
+    pub api_key_id: String,
+    pub revoked: bool,
+}
+
 #[async_trait::async_trait]
 pub trait Repository: Send + Sync {
     async fn create_user(&self, name: &str) -> anyhow::Result<String>;
@@ -11,9 +24,9 @@ pub trait Repository: Send + Sync {
         &self,
         user_id: &str,
         name: Option<&str>,
-    ) -> anyhow::Result<(String, String)>;
+    ) -> anyhow::Result<CreatedKey>;
     async fn list_keys(&self, user_id: &str) -> anyhow::Result<Vec<ApiKey>>;
-    async fn lookup_key(&self, key: &str) -> anyhow::Result<Option<(String, String, bool)>>;
+    async fn lookup_key(&self, key: &str) -> anyhow::Result<Option<KeyLookup>>;
     async fn revoke_key(&self, key_id: &str) -> anyhow::Result<()>;
 
     async fn insert_usage_log(&self, log: &UsageLog) -> anyhow::Result<()>;

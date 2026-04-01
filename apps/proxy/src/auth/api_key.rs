@@ -27,7 +27,7 @@ pub async fn require_api_key(
         })
         .ok_or(ProxyError::Unauthorized)?;
 
-    let (user_id, api_key_id, revoked) = state
+    let lookup = state
         .repo
         .lookup_key(&key)
         .await
@@ -37,13 +37,13 @@ pub async fn require_api_key(
         })?
         .ok_or(ProxyError::Unauthorized)?;
 
-    if revoked {
+    if lookup.revoked {
         return Err(ProxyError::Unauthorized);
     }
 
     request.extensions_mut().insert(KeyInfo {
-        user_id,
-        api_key_id,
+        user_id: lookup.user_id,
+        api_key_id: lookup.api_key_id,
     });
     Ok(next.run(request).await)
 }

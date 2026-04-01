@@ -37,24 +37,17 @@ impl JwksCache {
         }
     }
 
-    async fn get_jwks(&self) -> Option<JwkSet> {
-        let cache = self.state.lock().await;
-        if cache.fetched_at.elapsed().as_secs() < 3600 {
-            cache.jwks.clone()
-        } else {
-            None
-        }
-    }
-
     async fn fetch_jwks(&self) -> anyhow::Result<JwkSet> {
-        if let Some(jwks) = self.get_jwks().await {
-            return Ok(jwks);
+        let mut cache = self.state.lock().await;
+        if cache.fetched_at.elapsed().as_secs() < 3600 {
+            if let Some(ref jwks) = cache.jwks {
+                return Ok(jwks.clone());
+            }
         }
 
         let resp = reqwest::get(&self.jwks_url).await?;
         let jwks: JwkSet = resp.json().await?;
 
-        let mut cache = self.state.lock().await;
         cache.jwks = Some(jwks.clone());
         cache.fetched_at = std::time::Instant::now();
 

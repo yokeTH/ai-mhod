@@ -74,7 +74,7 @@ async fn create_repo() -> DynamoDbRepo {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt()
@@ -92,18 +92,18 @@ async fn main() {
     }
 }
 
-async fn run_user_cmd(cmd: UserCmd) {
+async fn run_user_cmd(cmd: UserCmd) -> anyhow::Result<()> {
     let db = create_repo().await;
     match cmd {
         UserCmd::Add { name } => {
-            let id = db.create_user(&name).await.expect("failed to create user");
+            let id = db.create_user(&name).await?;
             println!("Created user '{name}' (id: {id})");
         }
         UserCmd::List => {
-            let users = db.list_users().await.expect("failed to list users");
+            let users = db.list_users().await?;
             if users.is_empty() {
                 println!("No users found.");
-                return;
+                return Ok(());
             }
             println!("{:<40} {:<20} Created", "ID", "Name");
             for u in users {
@@ -111,83 +111,70 @@ async fn run_user_cmd(cmd: UserCmd) {
             }
         }
         UserCmd::SetKeycloak { user, sub } => {
-            let user_id = db
-                .lookup_user_by_name(&user)
-                .await
-                .expect("failed to look up user");
-            if user_id.is_none() {
+            let user_id = db.lookup_user_by_name(&user).await?;
+            if let Some(id) = user_id {
+                db.update_keycloak_sub(&id, &sub).await?;
+                println!("Updated keycloak_sub for '{user}' to '{sub}'");
+            } else {
                 eprintln!("user '{user}' not found");
                 std::process::exit(1);
             }
-            db.update_keycloak_sub(&user_id.unwrap(), &sub)
-                .await
-                .expect("failed to update keycloak sub");
-            println!("Updated keycloak_sub for '{user}' to '{sub}'");
         }
     }
+    Ok(())
 }
 
-async fn run_key_cmd(cmd: KeyCmd) {
+async fn run_key_cmd(cmd: KeyCmd) -> anyhow::Result<()> {
     let db = create_repo().await;
     match cmd {
         KeyCmd::Add { user, name } => {
-            let user_id = db
-                .lookup_user_by_name(&user)
-                .await
-                .expect("failed to look up user");
-            if user_id.is_none() {
+            let user_id = db.lookup_user_by_name(&user).await?;
+            if let Some(id) = user_id {
+                let created = db.create_key(&id, name.as_deref()).await?;
+                println!("{}", created.key);
+            } else {
                 eprintln!("user '{user}' not found");
                 std::process::exit(1);
             }
-            let user_id = user_id.unwrap();
-            let (_id, key) = db
-                .create_key(&user_id, name.as_deref())
-                .await
-                .expect("failed to create key");
-            println!("{key}");
         }
         KeyCmd::List { user } => {
-            let user_id = db
-                .lookup_user_by_name(&user)
-                .await
-                .expect("failed to look up user");
-            if user_id.is_none() {
+            let user_id = db.lookup_user_by_name(&user).await?;
+            if let Some(id) = user_id {
+                let keys = db.list_keys(&id).await?;
+                if keys.is_empty() {
+                    println!("No keys found for user '{user}'.");
+                    return Ok(());
+                }
+                println!("{:<40} {:<15} {:<8} Created", "Key", "Name", "Revoked");
+                for k in keys {
+                    let name = k.name.unwrap_or_default();
+                    let revoked = if k.revoked { "yes" } else { "no" };
+                    println!(
+                        "{:<40} {:<15} {:<8} {}",
+                        k.key, name, revoked, k.created_at
+                    );
+                }
+            } else {
                 eprintln!("user '{user}' not found");
                 std::process::exit(1);
-            }
-            let keys = db
-                .list_keys(&user_id.unwrap())
-                .await
-                .expect("failed to list keys");
-            if keys.is_empty() {
-                println!("No keys found for user '{user}'.");
-                return;
-            }
-            println!("{:<40} {:<15} {:<8} Created", "Key", "Name", "Revoked");
-            for k in keys {
-                let name = k.name.unwrap_or_default();
-                let revoked = if k.revoked { "yes" } else { "no" };
-                println!("{:<40} {:<15} {:<8} {}", k.key, name, revoked, k.created_at);
             }
         }
         KeyCmd::Revoke { key_id } => {
-            db.revoke_key(&key_id).await.expect("failed to revoke key");
+            db.revoke_key(&key_id).await?;
             println!("Key '{key_id}' revoked.");
         }
     }
+    Ok(())
 }
 
-async fn run_usage(user: Option<String>, key: Option<String>) {
+async fn run_usage(user: Option<String>, key: Option<String>) -> anyhow::Result<()> {
     let db = create_repo().await;
 
-    let rows = db
-        .usage_summary(user.as_deref(), key.as_deref())
-        .await
-        .expect("failed to get usage summary");
+    let rows = db.usage_summary(user.as_deref(), key.as_deref()).await?;
 
     if rows.is_empty() {
         println!("No usage data found.");
-        return;
+        return Ok(());
     }
 
     println!(
@@ -215,4 +202,5 @@ async fn run_usage(user: Option<String>, key: Option<String>) {
             r.total_duration_ms
         );
     }
+    Ok(())
 }

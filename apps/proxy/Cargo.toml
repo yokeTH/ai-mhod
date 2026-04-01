@@ -21,6 +21,8 @@ thiserror = { workspace = true }
 futures-util = { workspace = true }
 aws-config = { workspace = true }
 aws-sdk-dynamodb = { workspace = true }
+chrono = { workspace = true }
+redis = { workspace = true }
 
 [lints]
 workspace = true

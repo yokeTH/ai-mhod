@@ -7,6 +7,7 @@ edition = "2024"
 model = { workspace = true }
 repository = { workspace = true }
 dynamodb = { workspace = true }
+anyhow = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
