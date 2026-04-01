@@ -1,0 +1,18 @@
+[package]
+name = "dynamodb"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+model = { path = "../model" }
+repository = { path = "../repository" }
+aws-sdk-dynamodb = "1"
+serde = { version = "1", features = ["derive"] }
+serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }
+rand = "0.9"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+anyhow = "1"
+chrono = "0.4"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }

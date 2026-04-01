@@ -1,0 +1,11 @@
+[package]
+name = "repository"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+model = { path = "../model" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+chrono = "0.4"

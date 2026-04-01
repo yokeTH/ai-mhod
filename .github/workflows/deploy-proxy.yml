@@ -1,4 +1,4 @@
-name: Deploy Frontend
+name: Deploy Proxy
 on:
   push:
     tags:
@@ -12,7 +12,7 @@ permissions:
   packages: write
 
 jobs:
-  deploy-frontend:
+  deploy-proxy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -31,26 +31,26 @@ jobs:
       - name: Convert repo name to lowercase
         run: echo "REPO_NAME=$(echo $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - name: Build and push backend container
+      - name: Build and push proxy container
         id: docker_build
         uses: docker/build-push-action@v6
         with:
-          context: ./apps/web
-          file: ./apps/web/Dockerfile
+          context: .
+          file: ./apps/proxy/Dockerfile
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ghcr.io/${{ env.REPO_NAME }}/frontend:latest
-            ghcr.io/${{ env.REPO_NAME }}/frontend:${{ github.ref_name }}
+            ghcr.io/${{ env.REPO_NAME }}/proxy:latest
+            ghcr.io/${{ env.REPO_NAME }}/proxy:${{ github.ref_name }}
 
-      - name: Deploy frontend
+      - name: Deploy proxy
         uses: deploys-app/deploys-action@v1
         with:
           project: ${{ secrets.DEPLOYS_PROJECT }}
           location: gke.cluster-rcf2
-          name: ${{ secrets.DEPLOYS_DEPLOY_NAME_FRONTEND }}
-          image: ghcr.io/${{ env.REPO_NAME }}/frontend@${{ steps.docker_build.outputs.digest }}
+          name: ${{ secrets.DEPLOYS_DEPLOY_NAME_PROXY }}
+          image: ghcr.io/${{ env.REPO_NAME }}/proxy@${{ steps.docker_build.outputs.digest }}
         env:
           DEPLOYS_AUTH_USER: ${{ secrets.DEPLOYS_AUTH_USER }}
           DEPLOYS_AUTH_PASS: ${{ secrets.DEPLOYS_AUTH_PASS }}
