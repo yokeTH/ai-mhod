@@ -19,6 +19,7 @@ export const usageParsers = {
   from: parseAsString,
   to: parseAsString,
   granularity: parseAsStringLiteral(GRANULARITY_VALUES).withDefault("1hr"),
+  model: parseAsString,
 };
 
 export const usageSearchParamsCache = createSearchParamsCache(usageParsers);

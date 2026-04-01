@@ -16,12 +16,16 @@ pub struct UsageLogItem {
     pub cache_read_tokens: Option<u64>,
     pub duration_ms: u64,
     pub created_at: String,
+    pub gsi1_pk: String,
+    pub gsi1_sk: String,
 }
 
 impl UsageLogItem {
     pub fn from_log(log: model::usage_log::UsageLog, created_at: String) -> Self {
         let pk = format!("USER#{}", log.user_id);
         let sk = format!("LOG#{created_at}#{}", log.request_id);
+        let gsi1_pk = format!("USERMODEL#{}#{}", log.user_id, log.model);
+        let gsi1_sk = format!("LOG#{created_at}");
         Self {
             pk,
             sk,
@@ -36,6 +40,8 @@ impl UsageLogItem {
             cache_read_tokens: log.cache_read_tokens,
             duration_ms: log.duration_ms,
             created_at,
+            gsi1_pk,
+            gsi1_sk,
         }
     }
 }

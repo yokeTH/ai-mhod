@@ -423,35 +423,70 @@ impl Repository for DynamoDbRepo {
         granularity: model::usage_log::Granularity,
         model_filter: Option<&str>,
     ) -> anyhow::Result<Vec<model::usage_log::UsageGraphPoint>> {
-        let pk = format!("USER#{user_id}");
         let mut logs: Vec<UsageLogItem> = Vec::new();
         let mut exclusive_start_key: Option<HashMap<String, AttributeValue>> = None;
 
-        loop {
-            let mut q = self
-                .client
-                .query()
-                .table_name(&self.table_name)
-                .key_condition_expression("pk = :pk AND sk BETWEEN :from_sk AND :to_sk")
-                .expression_attribute_values(":pk", Self::s(&pk))
-                .expression_attribute_values(":from_sk", Self::s(&format!("LOG#{}", from.to_rfc3339())))
-                .expression_attribute_values(":to_sk", Self::s(&format!("LOG#{}", to.to_rfc3339())));
+        if let Some(model) = model_filter {
+            let gsi1_pk = format!("USERMODEL#{user_id}#{model}");
+            let from_sk = format!("LOG#{}", from.to_rfc3339());
+            let to_sk = format!("LOG#{}", to.to_rfc3339());
 
-            if let Some(key) = exclusive_start_key.take() {
-                q = q.set_exclusive_start_key(Some(key));
+            loop {
+                let mut q = self
+                    .client
+                    .query()
+                    .table_name(&self.table_name)
+                    .index_name("gsi1")
+                    .key_condition_expression("gsi1_pk = :pk AND gsi1_sk BETWEEN :from_sk AND :to_sk")
+                    .expression_attribute_values(":pk", Self::s(&gsi1_pk))
+                    .expression_attribute_values(":from_sk", Self::s(&from_sk))
+                    .expression_attribute_values(":to_sk", Self::s(&to_sk));
+
+                if let Some(key) = exclusive_start_key.take() {
+                    q = q.set_exclusive_start_key(Some(key));
+                }
+
+                let resp = q.send().await?;
+
+                for item in resp.items() {
+                    let log_item: UsageLogItem = serde_dynamo::from_item(item.clone())?;
+                    logs.push(log_item);
+                }
+
+                if resp.last_evaluated_key().is_none() {
+                    break;
+                }
+                exclusive_start_key = resp.last_evaluated_key().cloned();
             }
+        } else {
+            let pk = format!("USER#{user_id}");
 
-            let resp = q.send().await?;
+            loop {
+                let mut q = self
+                    .client
+                    .query()
+                    .table_name(&self.table_name)
+                    .key_condition_expression("pk = :pk AND sk BETWEEN :from_sk AND :to_sk")
+                    .expression_attribute_values(":pk", Self::s(&pk))
+                    .expression_attribute_values(":from_sk", Self::s(&format!("LOG#{}", from.to_rfc3339())))
+                    .expression_attribute_values(":to_sk", Self::s(&format!("LOG#{}", to.to_rfc3339())));
 
-            for item in resp.items() {
-                let log_item: UsageLogItem = serde_dynamo::from_item(item.clone())?;
-                logs.push(log_item);
+                if let Some(key) = exclusive_start_key.take() {
+                    q = q.set_exclusive_start_key(Some(key));
+                }
+
+                let resp = q.send().await?;
+
+                for item in resp.items() {
+                    let log_item: UsageLogItem = serde_dynamo::from_item(item.clone())?;
+                    logs.push(log_item);
+                }
+
+                if resp.last_evaluated_key().is_none() {
+                    break;
+                }
+                exclusive_start_key = resp.last_evaluated_key().cloned();
             }
-
-            if resp.last_evaluated_key().is_none() {
-                break;
-            }
-            exclusive_start_key = resp.last_evaluated_key().cloned();
         }
 
         // Group by period and sum tokens
@@ -463,12 +498,6 @@ impl Repository for DynamoDbRepo {
                 .ok();
 
             let Some(created) = created else { continue };
-
-            if let Some(m) = model_filter
-                && log_item.model != m
-            {
-                continue;
-            }
 
             let aligned = align_down(created, &granularity);
             let period_key = aligned.format("%Y-%m-%dT%H:%M:%SZ").to_string();
@@ -505,53 +534,95 @@ impl Repository for DynamoDbRepo {
         let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64)> = std::collections::BTreeMap::new();
 
         for user in &users {
-            let pk = format!("USER#{}", user.id);
             let mut exclusive_start_key: Option<HashMap<String, AttributeValue>> = None;
 
-            loop {
-                let mut q = self
-                    .client
-                    .query()
-                    .table_name(&self.table_name)
-                    .key_condition_expression("pk = :pk AND sk BETWEEN :from_sk AND :to_sk")
-                    .expression_attribute_values(":pk", Self::s(&pk))
-                    .expression_attribute_values(":from_sk", Self::s(&format!("LOG#{}", from.to_rfc3339())))
-                    .expression_attribute_values(":to_sk", Self::s(&format!("LOG#{}", to.to_rfc3339())));
+            if let Some(model) = model_filter {
+                let gsi1_pk = format!("USERMODEL#{}#{}", user.id, model);
+                let from_sk = format!("LOG#{}", from.to_rfc3339());
+                let to_sk = format!("LOG#{}", to.to_rfc3339());
 
-                if let Some(key) = exclusive_start_key.take() {
-                    q = q.set_exclusive_start_key(Some(key));
-                }
+                loop {
+                    let mut q = self
+                        .client
+                        .query()
+                        .table_name(&self.table_name)
+                        .index_name("gsi1")
+                        .key_condition_expression("gsi1_pk = :pk AND gsi1_sk BETWEEN :from_sk AND :to_sk")
+                        .expression_attribute_values(":pk", Self::s(&gsi1_pk))
+                        .expression_attribute_values(":from_sk", Self::s(&from_sk))
+                        .expression_attribute_values(":to_sk", Self::s(&to_sk));
 
-                let resp = q.send().await?;
-
-                for item in resp.items() {
-                    let log_item: UsageLogItem = serde_dynamo::from_item(item.clone())?;
-
-                    let created = chrono::DateTime::parse_from_rfc3339(&log_item.created_at)
-                        .map(|dt| dt.with_timezone(&chrono::Utc))
-                        .ok();
-
-                    let Some(created) = created else { continue };
-
-                    if let Some(m) = model_filter
-                        && log_item.model != m
-                    {
-                        continue;
+                    if let Some(key) = exclusive_start_key.take() {
+                        q = q.set_exclusive_start_key(Some(key));
                     }
 
-                    let aligned = align_down(created, &granularity);
-                    let period_key = aligned.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+                    let resp = q.send().await?;
 
-                    let entry = buckets.entry(period_key).or_insert((0, 0, 0));
-                    entry.0 += log_item.input_tokens.unwrap_or(0) as i64;
-                    entry.1 += log_item.output_tokens.unwrap_or(0) as i64;
-                    entry.2 += log_item.cache_read_tokens.unwrap_or(0) as i64;
-                }
+                    for item in resp.items() {
+                        let log_item: UsageLogItem = serde_dynamo::from_item(item.clone())?;
 
-                if resp.last_evaluated_key().is_none() {
-                    break;
+                        let created = chrono::DateTime::parse_from_rfc3339(&log_item.created_at)
+                            .map(|dt| dt.with_timezone(&chrono::Utc))
+                            .ok();
+
+                        let Some(created) = created else { continue };
+
+                        let aligned = align_down(created, &granularity);
+                        let period_key = aligned.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+                        let entry = buckets.entry(period_key).or_insert((0, 0, 0));
+                        entry.0 += log_item.input_tokens.unwrap_or(0) as i64;
+                        entry.1 += log_item.output_tokens.unwrap_or(0) as i64;
+                        entry.2 += log_item.cache_read_tokens.unwrap_or(0) as i64;
+                    }
+
+                    if resp.last_evaluated_key().is_none() {
+                        break;
+                    }
+                    exclusive_start_key = resp.last_evaluated_key().cloned();
                 }
-                exclusive_start_key = resp.last_evaluated_key().cloned();
+            } else {
+                let pk = format!("USER#{}", user.id);
+
+                loop {
+                    let mut q = self
+                        .client
+                        .query()
+                        .table_name(&self.table_name)
+                        .key_condition_expression("pk = :pk AND sk BETWEEN :from_sk AND :to_sk")
+                        .expression_attribute_values(":pk", Self::s(&pk))
+                        .expression_attribute_values(":from_sk", Self::s(&format!("LOG#{}", from.to_rfc3339())))
+                        .expression_attribute_values(":to_sk", Self::s(&format!("LOG#{}", to.to_rfc3339())));
+
+                    if let Some(key) = exclusive_start_key.take() {
+                        q = q.set_exclusive_start_key(Some(key));
+                    }
+
+                    let resp = q.send().await?;
+
+                    for item in resp.items() {
+                        let log_item: UsageLogItem = serde_dynamo::from_item(item.clone())?;
+
+                        let created = chrono::DateTime::parse_from_rfc3339(&log_item.created_at)
+                            .map(|dt| dt.with_timezone(&chrono::Utc))
+                            .ok();
+
+                        let Some(created) = created else { continue };
+
+                        let aligned = align_down(created, &granularity);
+                        let period_key = aligned.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+                        let entry = buckets.entry(period_key).or_insert((0, 0, 0));
+                        entry.0 += log_item.input_tokens.unwrap_or(0) as i64;
+                        entry.1 += log_item.output_tokens.unwrap_or(0) as i64;
+                        entry.2 += log_item.cache_read_tokens.unwrap_or(0) as i64;
+                    }
+
+                    if resp.last_evaluated_key().is_none() {
+                        break;
+                    }
+                    exclusive_start_key = resp.last_evaluated_key().cloned();
+                }
             }
         }
 

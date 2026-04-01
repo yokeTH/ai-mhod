@@ -56,7 +56,7 @@ const SHARED_CARDS: { key: keyof UsageShared; label: string }[] = [
   { key: "cache", label: "Cache Tokens" },
 ];
 
-export function UsageDashboard({ points, shared }: { points: UsageGraphPoint[]; shared: UsageShared }) {
+export function UsageDashboard({ points, shared, models }: { points: UsageGraphPoint[]; shared: UsageShared; models: string[] }) {
   const [params, setParams] = useQueryStates(usageParsers, { shallow: false });
 
   const defaults = useMemo(() => {
@@ -69,6 +69,7 @@ export function UsageDashboard({ points, shared }: { points: UsageGraphPoint[]; 
   const fromStr = params.from ?? defaults.from;
   const toStr = params.to ?? defaults.to;
   const granularity = params.granularity ?? "1hr";
+  const selectedModel = params.model ?? "";
 
   const [calRange, setCalRange] = useState<DateRange | undefined>(() => ({
     from: new Date(fromStr),
@@ -149,6 +150,22 @@ export function UsageDashboard({ points, shared }: { points: UsageGraphPoint[]; 
             ))}
           </SelectContent>
         </Select>
+
+        {models.length > 0 && (
+          <Select value={selectedModel} onValueChange={(v) => setParams({ model: v || null })}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="All Models" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Models</SelectItem>
+              {models.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
         <div className="flex items-center gap-4">
           {VIEW_OPTIONS.map(({ key, label }) => (

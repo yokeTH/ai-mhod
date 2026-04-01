@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { getUsageGraph } from "@/actions/usage";
+import { getUsageGraph, getUsageModels } from "@/actions/usage";
 import { UsageDashboard } from "@/components/dashboard/usage/dashboard";
 import { isErrorResponse } from "@/lib/api-error";
 import { usageSearchParamsCache } from "./params";
@@ -10,7 +10,7 @@ export default async function UsagePage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const { from: fromParam, to: toParam, granularity } =
+  const { from: fromParam, to: toParam, granularity, model } =
     await usageSearchParamsCache.parse(searchParams);
 
   const today = new Date();
@@ -20,15 +20,20 @@ export default async function UsagePage({
   const from = fromParam ?? sevenDaysAgo.toISOString();
   const to = toParam ?? today.toISOString();
 
-  const data = await getUsageGraph({ from, to, granularity });
+  const [data, modelsData] = await Promise.all([
+    getUsageGraph({ from, to, granularity, model: model ?? undefined }),
+    getUsageModels(),
+  ]);
 
   if (isErrorResponse(data)) {
     return "GET DATA ERROR";
   }
 
+  const models = isErrorResponse(modelsData) ? [] : modelsData.data;
+
   return (
     <Suspense>
-      <UsageDashboard points={data.data.points} shared={data.data.shared} />
+      <UsageDashboard points={data.data.points} shared={data.data.shared} models={models} />
     </Suspense>
   );
 }

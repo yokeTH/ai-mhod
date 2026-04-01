@@ -35,6 +35,16 @@ resource "aws_dynamodb_table" "ai_mhod" {
     type = "S"
   }
 
+  attribute {
+    name = "gsi3_pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "gsi3_sk"
+    type = "S"
+  }
+
   global_secondary_index {
     name            = "gsi1"
     hash_key        = "gsi1_pk"
@@ -46,6 +56,13 @@ resource "aws_dynamodb_table" "ai_mhod" {
     name            = "gsi2"
     hash_key        = "gsi2_pk"
     range_key       = "gsi2_sk"
+    projection_type = "ALL"
+  }
+
+  global_secondary_index {
+    name            = "gsi3"
+    hash_key        = "gsi3_pk"
+    range_key       = "gsi3_sk"
     projection_type = "ALL"
   }
 
