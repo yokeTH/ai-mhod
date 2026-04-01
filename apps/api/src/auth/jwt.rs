@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::extract::{FromRequestParts, Request, State};
 use axum::http::HeaderMap;
@@ -8,8 +8,8 @@ use axum::response::Response;
 use jsonwebtoken::{DecodingKey, Validation, decode, jwk::JwkSet};
 use serde::Deserialize;
 
-use error::ProxyError;
 use crate::AppState;
+use error::ProxyError;
 
 #[derive(Debug, Deserialize)]
 struct Claims {
@@ -18,7 +18,7 @@ struct Claims {
 
 pub struct JwksCache {
     jwks_url: String,
-    state: Arc<Mutex<CachedJwks>>,
+    state: Arc<tokio::sync::Mutex<CachedJwks>>,
 }
 
 struct CachedJwks {
@@ -30,15 +30,15 @@ impl JwksCache {
     pub fn new(jwks_url: String) -> Self {
         Self {
             jwks_url,
-            state: Arc::new(Mutex::new(CachedJwks {
+            state: Arc::new(tokio::sync::Mutex::new(CachedJwks {
                 jwks: None,
                 fetched_at: std::time::Instant::now() - std::time::Duration::from_secs(3600),
             })),
         }
     }
 
-    fn get_jwks(&self) -> Option<JwkSet> {
-        let cache = self.state.lock().unwrap();
+    async fn get_jwks(&self) -> Option<JwkSet> {
+        let cache = self.state.lock().await;
         if cache.fetched_at.elapsed().as_secs() < 3600 {
             cache.jwks.clone()
         } else {
@@ -47,14 +47,14 @@ impl JwksCache {
     }
 
     async fn fetch_jwks(&self) -> anyhow::Result<JwkSet> {
-        if let Some(jwks) = self.get_jwks() {
+        if let Some(jwks) = self.get_jwks().await {
             return Ok(jwks);
         }
 
         let resp = reqwest::get(&self.jwks_url).await?;
         let jwks: JwkSet = resp.json().await?;
 
-        let mut cache = self.state.lock().unwrap();
+        let mut cache = self.state.lock().await;
         cache.jwks = Some(jwks.clone());
         cache.fetched_at = std::time::Instant::now();
 
@@ -65,9 +65,13 @@ impl JwksCache {
         let jwks = self.fetch_jwks().await?;
 
         let header = jsonwebtoken::decode_header(token)?;
-        let kid = header.kid.ok_or_else(|| anyhow::anyhow!("missing kid in token header"))?;
+        let kid = header
+            .kid
+            .ok_or_else(|| anyhow::anyhow!("missing kid in token header"))?;
 
-        let jwk = jwks.find(&kid).ok_or_else(|| anyhow::anyhow!("JWK not found for kid: {kid}"))?;
+        let jwk = jwks
+            .find(&kid)
+            .ok_or_else(|| anyhow::anyhow!("JWK not found for kid: {kid}"))?;
 
         let decoding_key = DecodingKey::from_jwk(jwk)?;
         let mut validation = Validation::new(header.alg);
@@ -92,14 +96,10 @@ pub async fn require_jwt(
         .and_then(|v| v.strip_prefix("Bearer ").map(|s| s.trim().to_string()))
         .ok_or(ProxyError::Unauthorized)?;
 
-    let sub: String = state
-        .jwks_cache
-        .verify_token(&token)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "JWT verification failed");
-            ProxyError::Unauthorized
-        })?;
+    let sub: String = state.jwks_cache.verify_token(&token).await.map_err(|e| {
+        tracing::warn!(error = %e, "JWT verification failed");
+        ProxyError::Unauthorized
+    })?;
 
     let user_id = state
         .repo

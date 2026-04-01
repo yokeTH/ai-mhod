@@ -4,8 +4,8 @@ use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::Response;
 
-use error::ProxyError;
 use crate::AppState;
+use error::ProxyError;
 
 /// Middleware that validates the API key from either `x-api-key` or `Authorization: Bearer` headers.
 /// Looks up the key in the database and stores KeyInfo (user_id + api_key) in request extensions.
@@ -41,7 +41,10 @@ pub async fn require_api_key(
         return Err(ProxyError::Unauthorized);
     }
 
-    request.extensions_mut().insert(KeyInfo { user_id, api_key_id });
+    request.extensions_mut().insert(KeyInfo {
+        user_id,
+        api_key_id,
+    });
     Ok(next.run(request).await)
 }
 

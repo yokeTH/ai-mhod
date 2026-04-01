@@ -1,3 +1,3 @@
 pub mod jwt;
 
-pub use jwt::{require_jwt, JwtUser};
+pub use jwt::{JwtUser, require_jwt};

@@ -17,16 +17,18 @@ pub struct UserItem {
 impl From<model::user::User> for UserItem {
     fn from(user: model::user::User) -> Self {
         let pk = format!("USER#{}", user.id);
+        let gsi1_pk = format!("USERNAME#{}", user.name);
+        let gsi1_sk = format!("USER#{}", user.id);
         Self {
-            pk: pk.clone(),
-            sk: pk,
+            sk: pk.clone(),
+            pk,
             item_type: "USER".to_string(),
-            id: user.id.clone(),
-            name: user.name.clone(),
+            id: user.id,
+            name: user.name,
             created_at: user.created_at,
             keycloak_sub: user.keycloak_sub,
-            gsi1_pk: format!("USERNAME#{}", user.name),
-            gsi1_sk: format!("USER#{}", user.id),
+            gsi1_pk,
+            gsi1_sk,
         }
     }
 }

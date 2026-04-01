@@ -7,9 +7,9 @@ use axum::routing::any;
 
 use crate::AppState;
 use crate::auth::KeyInfo;
-use error::ProxyError;
 use crate::metrics::RequestMetrics;
 use crate::proxy::proxy_to;
+use error::ProxyError;
 
 /// Router for /zai/* -> https://api.z.ai/*
 pub fn zai_router() -> Router<AppState> {
@@ -34,13 +34,13 @@ async fn zai_proxy_handler(
 
     let url = format!("https://api.z.ai/{path}");
 
-    let is_stream = serde_json::from_slice::<serde_json::Value>(&body)
-        .ok()
+    let body_json = serde_json::from_slice::<serde_json::Value>(&body).ok();
+    let is_stream = body_json
+        .as_ref()
         .and_then(|v| v.get("stream").and_then(|s| s.as_bool()))
         .unwrap_or(false);
 
-    let model = serde_json::from_slice::<serde_json::Value>(&body)
-        .ok()
+    let model = body_json
         .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(String::from))
         .unwrap_or_default();
 

@@ -35,17 +35,16 @@ async fn main() {
 
 async fn run_server() {
     let cfg = Config::from_env();
+    let port = cfg.port;
 
-    let repo = config::create_repo().await;
-
+    let repo = dynamodb::DynamoDbRepo::from_env().await;
     let jwks_cache = JwksCache::new(cfg.keycloak_jwks_url.clone());
 
     let state: AppState = Arc::new(AppInner {
-        config: cfg.clone(),
+        config: cfg,
         repo: Box::new(repo),
         jwks_cache,
     });
-    let port = state.config.port;
 
     let dashboard_routes = routes::dashboard::dashboard_router().layer(
         axum::middleware::from_fn_with_state(state.clone(), auth::require_jwt),

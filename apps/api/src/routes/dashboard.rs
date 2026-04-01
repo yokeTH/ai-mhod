@@ -1,12 +1,12 @@
+use axum::Router;
 use axum::extract::State;
 use axum::routing::get;
-use axum::Router;
 use serde::Deserialize;
 
-use crate::auth::JwtUser;
-use error::ProxyError;
-use crate::response::ApiResponse;
 use crate::AppState;
+use crate::auth::JwtUser;
+use crate::response::ApiResponse;
+use error::ProxyError;
 
 #[derive(Debug, Deserialize)]
 struct UsageGraphQuery {
@@ -51,7 +51,13 @@ async fn usage_graph_handler(
 
     let points = state
         .repo
-        .usage_graph(&user.user_id, from, to, granularity.clone(), params.model.as_deref())
+        .usage_graph(
+            &user.user_id,
+            from,
+            to,
+            granularity.clone(),
+            params.model.as_deref(),
+        )
         .await
         .map_err(|e| ProxyError::UpstreamError(format!("failed to query usage graph: {e}")))?;
 
@@ -70,9 +76,21 @@ async fn usage_graph_handler(
     let all_cache: i64 = total_points.iter().map(|p| p.cache).sum();
 
     let shared = model::usage_log::UsageShared {
-        inputs: if all_inputs > 0 { (user_inputs as f64 / all_inputs as f64) * 100.0 } else { 0.0 },
-        outputs: if all_outputs > 0 { (user_outputs as f64 / all_outputs as f64) * 100.0 } else { 0.0 },
-        cache: if all_cache > 0 { (user_cache as f64 / all_cache as f64) * 100.0 } else { 0.0 },
+        inputs: if all_inputs > 0 {
+            (user_inputs as f64 / all_inputs as f64) * 100.0
+        } else {
+            0.0
+        },
+        outputs: if all_outputs > 0 {
+            (user_outputs as f64 / all_outputs as f64) * 100.0
+        } else {
+            0.0
+        },
+        cache: if all_cache > 0 {
+            (user_cache as f64 / all_cache as f64) * 100.0
+        } else {
+            0.0
+        },
     };
 
     Ok(ApiResponse::ok(model::usage_log::UsageGraphResponse {
@@ -98,4 +116,33 @@ pub fn dashboard_router() -> Router<AppState> {
     Router::new()
         .route("/usage/graph", get(usage_graph_handler))
         .route("/usage/models", get(list_models_handler))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_iso_date_rfc3339() {
+        let result = parse_iso_date("2026-04-02T10:30:00Z").unwrap();
+        assert_eq!(result.to_rfc3339(), "2026-04-02T10:30:00+00:00");
+    }
+
+    #[test]
+    fn parse_iso_date_date_only() {
+        let result = parse_iso_date("2026-04-02").unwrap();
+        assert_eq!(result.to_rfc3339(), "2026-04-02T00:00:00+00:00");
+    }
+
+    #[test]
+    fn parse_iso_date_invalid() {
+        let result = parse_iso_date("not-a-date");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_iso_date_empty() {
+        let result = parse_iso_date("");
+        assert!(result.is_err());
+    }
 }

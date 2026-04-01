@@ -36,7 +36,13 @@ impl Clone for RequestMetrics {
 }
 
 impl RequestMetrics {
-    pub fn new(model: &str, stream: bool, user_id: &str, api_key_id: &str, usage_tx: mpsc::Sender<model::usage_log::UsageLog>) -> Self {
+    pub fn new(
+        model: &str,
+        stream: bool,
+        user_id: &str,
+        api_key_id: &str,
+        usage_tx: mpsc::Sender<model::usage_log::UsageLog>,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 request_id: uuid::Uuid::new_v4().to_string(),

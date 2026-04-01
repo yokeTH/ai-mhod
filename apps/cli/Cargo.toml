@@ -4,13 +4,16 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-model = { path = "../../crates/model" }
-repository = { path = "../../crates/repository" }
-dynamodb = { path = "../../crates/dynamodb" }
-tokio = { version = "1", features = ["full"] }
-clap = { version = "4", features = ["derive"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-dotenvy = "0.15"
-aws-config = "1"
-aws-sdk-dynamodb = "1"
+model = { workspace = true }
+repository = { workspace = true }
+dynamodb = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+dotenvy = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-dynamodb = { workspace = true }
+
+[lints]
+workspace = true

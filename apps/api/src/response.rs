@@ -1,5 +1,5 @@
-use axum::response::{IntoResponse, Response};
 use axum::Json;
+use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -17,6 +17,7 @@ pub struct Pagination {
 }
 
 impl<T: Serialize> ApiResponse<T> {
+    #[must_use]
     pub fn ok(data: T) -> Self {
         Self {
             data,

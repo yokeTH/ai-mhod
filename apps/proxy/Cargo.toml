@@ -4,20 +4,23 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-model = { path = "../../crates/model" }
-repository = { path = "../../crates/repository" }
-dynamodb = { path = "../../crates/dynamodb" }
-error = { path = "../../crates/error" }
-axum = { version = "0.8", features = ["macros"] }
-tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.13", features = ["stream", "json"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1", features = ["v4"] }
-dotenvy = "0.15"
-thiserror = "2"
-futures-util = "0.3"
-aws-config = "1"
-aws-sdk-dynamodb = "1"
+model = { workspace = true }
+repository = { workspace = true }
+dynamodb = { workspace = true }
+error = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+dotenvy = { workspace = true }
+thiserror = { workspace = true }
+futures-util = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-dynamodb = { workspace = true }
+
+[lints]
+workspace = true

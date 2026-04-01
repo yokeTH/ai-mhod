@@ -10,9 +10,50 @@ members = [
 ]
 resolver = "3"
 
+[workspace.dependencies]
+model = { path = "crates/model" }
+repository = { path = "crates/repository" }
+dynamodb = { path = "crates/dynamodb" }
+error = { path = "crates/error" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+thiserror = "2"
+axum = { version = "0.8", features = ["macros"] }
+aws-config = "1"
+aws-sdk-dynamodb = "1"
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
+dotenvy = "0.15"
+reqwest = { version = "0.13", features = ["stream", "json"] }
+futures-util = "0.3"
+clap = { version = "4", features = ["derive"] }
+async-trait = "0.1"
+rand = "0.9"
+serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }
+jsonwebtoken = "9"
+
+[workspace.lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+
 [profile.release]
 opt-level = 3
 lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[profile.bench]
+inherits = "release"
+debug = true
+strip = false
+
+[profile.dev.package."*"]
+opt-level = 3

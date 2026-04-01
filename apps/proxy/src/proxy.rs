@@ -3,10 +3,10 @@ use axum::http::HeaderMap;
 use axum::response::Response;
 use futures_util::StreamExt;
 
-use error::ProxyError;
-use crate::metrics::RequestMetrics;
 use crate::AppState;
 use crate::dto::claude::AnthropicResponse;
+use crate::metrics::RequestMetrics;
+use error::ProxyError;
 
 /// Forward a request to an upstream URL. Passthrough body, swap auth header.
 pub async fn proxy_to(
@@ -24,16 +24,20 @@ pub async fn proxy_to(
     for (key, val) in headers.iter() {
         let key = key.as_str();
         // Skip hop-by-hop and auth headers — we set our own
-        if matches!(key, "host" | "connection" | "transfer-encoding" | "content-length"
-            | "x-api-key" | "authorization")
-        {
+        if matches!(
+            key,
+            "host"
+                | "connection"
+                | "transfer-encoding"
+                | "content-length"
+                | "x-api-key"
+                | "authorization"
+        ) {
             continue;
         }
         req_builder = req_builder.header(key, val);
     }
-    req_builder = req_builder
-        .header("x-api-key", upstream_api_key)
-        .body(body);
+    req_builder = req_builder.header("x-api-key", upstream_api_key).body(body);
 
     let response = req_builder
         .send()

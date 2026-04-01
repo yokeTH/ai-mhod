@@ -1,4 +1,3 @@
-use aws_config::BehaviorVersion;
 use clap::Parser;
 use dynamodb::DynamoDbRepo;
 use repository::Repository;
@@ -71,10 +70,7 @@ enum KeyCmd {
 }
 
 async fn create_repo() -> DynamoDbRepo {
-    let table_name = std::env::var("TABLE_NAME").unwrap_or_else(|_| "mhod".to_string());
-    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
-    let client = aws_sdk_dynamodb::Client::new(&config);
-    DynamoDbRepo::new(client, table_name)
+    DynamoDbRepo::from_env().await
 }
 
 #[tokio::main]

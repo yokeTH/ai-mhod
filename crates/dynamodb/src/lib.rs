@@ -1,10 +1,12 @@
 mod items;
 
 use std::collections::HashMap;
+use std::fmt::Write;
 
 use async_trait::async_trait;
-use aws_sdk_dynamodb::types::{AttributeValue, Select};
+use aws_config::BehaviorVersion;
 use aws_sdk_dynamodb::Client;
+use aws_sdk_dynamodb::types::{AttributeValue, Select};
 use chrono::{Datelike, Duration, Timelike, Utc};
 use items::{KeyItem, UsageLogItem, UserItem};
 use rand::Rng;
@@ -20,57 +22,108 @@ impl DynamoDbRepo {
         Self { client, table_name }
     }
 
-    fn generate_key() -> String {
-        let hex: String = (0..32).map(|_| format!("{:02x}", rand::rng().random::<u8>())).collect();
-        format!("mh_{hex}")
+    pub fn table_name() -> String {
+        std::env::var("TABLE_NAME").unwrap_or_else(|_| "mhod".to_string())
     }
 
+    pub async fn from_env() -> Self {
+        let table_name = Self::table_name();
+        let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+        let client = aws_sdk_dynamodb::Client::new(&config);
+        Self::new(client, table_name)
+    }
+
+    fn generate_key() -> String {
+        let mut buf = String::with_capacity(65);
+        buf.push_str("mh_");
+        for _ in 0..32 {
+            write!(buf, "{:02x}", rand::rng().random::<u8>())
+                .expect("writing to String never fails");
+        }
+        buf
+    }
+
+    #[inline]
     fn s(val: &str) -> AttributeValue {
         AttributeValue::S(val.to_string())
     }
 }
 
-fn align_down(dt: chrono::DateTime<chrono::Utc>, granularity: &model::usage_log::Granularity) -> chrono::DateTime<chrono::Utc> {
+fn align_down(
+    dt: chrono::DateTime<chrono::Utc>,
+    granularity: &model::usage_log::Granularity,
+) -> chrono::DateTime<chrono::Utc> {
     match granularity {
         model::usage_log::Granularity::FifteenMin => {
             let slot = (dt.minute() / 15) * 15;
-            dt.with_second(0).unwrap().with_minute(slot).unwrap()
+            dt.with_second(0)
+                .expect("align_down: 0 is valid second")
+                .with_minute(slot)
+                .expect("align_down: slot is valid minute")
         }
         model::usage_log::Granularity::ThirtyMin => {
             let slot = (dt.minute() / 30) * 30;
-            dt.with_second(0).unwrap().with_minute(slot).unwrap()
+            dt.with_second(0)
+                .expect("align_down: 0 is valid second")
+                .with_minute(slot)
+                .expect("align_down: slot is valid minute")
         }
-        model::usage_log::Granularity::OneHour => {
-            dt.with_second(0).unwrap().with_minute(0).unwrap()
-        }
+        model::usage_log::Granularity::OneHour => dt
+            .with_second(0)
+            .expect("align_down: 0 is valid second")
+            .with_minute(0)
+            .expect("align_down: 0 is valid minute"),
         model::usage_log::Granularity::FourHours => {
             let slot = (dt.hour() / 4) * 4;
-            dt.with_second(0).unwrap().with_minute(0).unwrap().with_hour(slot).unwrap()
+            dt.with_second(0)
+                .expect("align_down: 0 is valid second")
+                .with_minute(0)
+                .expect("align_down: 0 is valid minute")
+                .with_hour(slot)
+                .expect("align_down: slot is valid hour")
         }
         model::usage_log::Granularity::TwelveHours => {
             let slot = (dt.hour() / 12) * 12;
-            dt.with_second(0).unwrap().with_minute(0).unwrap().with_hour(slot).unwrap()
+            dt.with_second(0)
+                .expect("align_down: 0 is valid second")
+                .with_minute(0)
+                .expect("align_down: 0 is valid minute")
+                .with_hour(slot)
+                .expect("align_down: slot is valid hour")
         }
-        model::usage_log::Granularity::Daily => {
-            dt.with_second(0).unwrap().with_minute(0).unwrap().with_hour(0).unwrap()
-        }
+        model::usage_log::Granularity::Daily => dt
+            .with_second(0)
+            .expect("align_down: 0 is valid second")
+            .with_minute(0)
+            .expect("align_down: 0 is valid minute")
+            .with_hour(0)
+            .expect("align_down: 0 is valid hour"),
         model::usage_log::Granularity::Weekly => {
             let weekday = dt.weekday().num_days_from_monday();
-            dt.with_second(0).unwrap()
-                .with_minute(0).unwrap()
-                .with_hour(0).unwrap()
+            dt.with_second(0)
+                .expect("align_down: 0 is valid second")
+                .with_minute(0)
+                .expect("align_down: 0 is valid minute")
+                .with_hour(0)
+                .expect("align_down: 0 is valid hour")
                 - Duration::days(weekday as i64)
         }
-        model::usage_log::Granularity::Monthly => {
-            dt.with_second(0).unwrap()
-                .with_minute(0).unwrap()
-                .with_hour(0).unwrap()
-                .with_day(1).unwrap()
-        }
+        model::usage_log::Granularity::Monthly => dt
+            .with_second(0)
+            .expect("align_down: 0 is valid second")
+            .with_minute(0)
+            .expect("align_down: 0 is valid minute")
+            .with_hour(0)
+            .expect("align_down: 0 is valid hour")
+            .with_day(1)
+            .expect("align_down: 1 is valid day"),
     }
 }
 
-fn step_period(dt: chrono::DateTime<chrono::Utc>, granularity: &model::usage_log::Granularity) -> Option<chrono::DateTime<chrono::Utc>> {
+fn step_period(
+    dt: chrono::DateTime<chrono::Utc>,
+    granularity: &model::usage_log::Granularity,
+) -> Option<chrono::DateTime<chrono::Utc>> {
     use model::usage_log::Granularity;
     match granularity {
         Granularity::FifteenMin => dt.checked_add_signed(Duration::minutes(15)),
@@ -91,7 +144,11 @@ fn step_period(dt: chrono::DateTime<chrono::Utc>, granularity: &model::usage_log
     }
 }
 
-fn generate_periods(from: chrono::DateTime<chrono::Utc>, to: chrono::DateTime<chrono::Utc>, granularity: &model::usage_log::Granularity) -> Vec<String> {
+fn generate_periods(
+    from: chrono::DateTime<chrono::Utc>,
+    to: chrono::DateTime<chrono::Utc>,
+    granularity: &model::usage_log::Granularity,
+) -> Vec<String> {
     let mut periods = Vec::new();
     let mut current = align_down(from, granularity);
     while current <= to {
@@ -186,7 +243,11 @@ impl Repository for DynamoDbRepo {
         }
     }
 
-    async fn create_key(&self, user_id: &str, name: Option<&str>) -> anyhow::Result<(String, String)> {
+    async fn create_key(
+        &self,
+        user_id: &str,
+        name: Option<&str>,
+    ) -> anyhow::Result<(String, String)> {
         let id = uuid::Uuid::new_v4().to_string();
         let key = Self::generate_key();
         let now = Utc::now().to_rfc3339();
@@ -252,7 +313,11 @@ impl Repository for DynamoDbRepo {
         match resp.items().first() {
             Some(item) => {
                 let key_item: KeyItem = serde_dynamo::from_item(item.clone())?;
-                Ok(Some((key_item.user_id, key_item.id, key_item.revoked.unwrap_or(true))))
+                Ok(Some((
+                    key_item.user_id,
+                    key_item.id,
+                    key_item.revoked.unwrap_or(true),
+                )))
             }
             None => Ok(None),
         }
@@ -279,7 +344,8 @@ impl Repository for DynamoDbRepo {
 
     async fn insert_usage_log(&self, log: &model::usage_log::UsageLog) -> anyhow::Result<()> {
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let item: HashMap<String, AttributeValue> = serde_dynamo::to_item(UsageLogItem::from_log(log.clone(), now))?;
+        let item: HashMap<String, AttributeValue> =
+            serde_dynamo::to_item(UsageLogItem::from_log(log.clone(), now))?;
 
         self.client
             .put_item()
@@ -291,8 +357,13 @@ impl Repository for DynamoDbRepo {
         Ok(())
     }
 
-    async fn usage_summary(&self, user_id: Option<&str>, api_key_id: Option<&str>) -> anyhow::Result<Vec<model::usage_log::UsageRow>> {
-        let mut aggregates: HashMap<(String, String, Option<String>), model::usage_log::UsageRow> = HashMap::new();
+    async fn usage_summary(
+        &self,
+        user_id: Option<&str>,
+        api_key_id: Option<&str>,
+    ) -> anyhow::Result<Vec<model::usage_log::UsageRow>> {
+        let mut aggregates: HashMap<(String, String, Option<String>), model::usage_log::UsageRow> =
+            HashMap::new();
 
         let pk_values: Vec<String> = match user_id {
             Some(id) => vec![format!("USER#{id}")],
@@ -331,18 +402,25 @@ impl Repository for DynamoDbRepo {
                         continue;
                     }
 
-                    let key = (u_id.clone(), log_item.model.clone(), Some(log_item.api_key_id.clone()));
+                    let key = (
+                        u_id.clone(),
+                        log_item.model.clone(),
+                        Some(log_item.api_key_id.clone()),
+                    );
 
-                    let entry = aggregates.entry(key).or_insert_with(|| model::usage_log::UsageRow {
-                        user_id: u_id,
-                        model: log_item.model.clone(),
-                        api_key_id: Some(log_item.api_key_id.clone()),
-                        total_requests: 0,
-                        total_input_tokens: 0,
-                        total_output_tokens: 0,
-                        total_cache_read_tokens: 0,
-                        total_duration_ms: 0,
-                    });
+                    let entry =
+                        aggregates
+                            .entry(key)
+                            .or_insert_with(|| model::usage_log::UsageRow {
+                                user_id: u_id,
+                                model: log_item.model.clone(),
+                                api_key_id: Some(log_item.api_key_id.clone()),
+                                total_requests: 0,
+                                total_input_tokens: 0,
+                                total_output_tokens: 0,
+                                total_cache_read_tokens: 0,
+                                total_duration_ms: 0,
+                            });
 
                     entry.total_requests += 1;
                     entry.total_input_tokens += log_item.input_tokens.unwrap_or(0) as i64;
@@ -437,7 +515,9 @@ impl Repository for DynamoDbRepo {
                     .query()
                     .table_name(&self.table_name)
                     .index_name("gsi1")
-                    .key_condition_expression("gsi1_pk = :pk AND gsi1_sk BETWEEN :from_sk AND :to_sk")
+                    .key_condition_expression(
+                        "gsi1_pk = :pk AND gsi1_sk BETWEEN :from_sk AND :to_sk",
+                    )
                     .expression_attribute_values(":pk", Self::s(&gsi1_pk))
                     .expression_attribute_values(":from_sk", Self::s(&from_sk))
                     .expression_attribute_values(":to_sk", Self::s(&to_sk));
@@ -468,8 +548,14 @@ impl Repository for DynamoDbRepo {
                     .table_name(&self.table_name)
                     .key_condition_expression("pk = :pk AND sk BETWEEN :from_sk AND :to_sk")
                     .expression_attribute_values(":pk", Self::s(&pk))
-                    .expression_attribute_values(":from_sk", Self::s(&format!("LOG#{}", from.to_rfc3339())))
-                    .expression_attribute_values(":to_sk", Self::s(&format!("LOG#{}", to.to_rfc3339())));
+                    .expression_attribute_values(
+                        ":from_sk",
+                        Self::s(&format!("LOG#{}", from.to_rfc3339())),
+                    )
+                    .expression_attribute_values(
+                        ":to_sk",
+                        Self::s(&format!("LOG#{}", to.to_rfc3339())),
+                    );
 
                 if let Some(key) = exclusive_start_key.take() {
                     q = q.set_exclusive_start_key(Some(key));
@@ -490,7 +576,8 @@ impl Repository for DynamoDbRepo {
         }
 
         // Group by period and sum tokens
-        let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64)> = std::collections::BTreeMap::new();
+        let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64)> =
+            std::collections::BTreeMap::new();
 
         for log_item in &logs {
             let created = chrono::DateTime::parse_from_rfc3339(&log_item.created_at)
@@ -531,7 +618,8 @@ impl Repository for DynamoDbRepo {
         model_filter: Option<&str>,
     ) -> anyhow::Result<Vec<model::usage_log::UsageGraphPoint>> {
         let users = self.list_users().await?;
-        let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64)> = std::collections::BTreeMap::new();
+        let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64)> =
+            std::collections::BTreeMap::new();
 
         for user in &users {
             let mut exclusive_start_key: Option<HashMap<String, AttributeValue>> = None;
@@ -547,7 +635,9 @@ impl Repository for DynamoDbRepo {
                         .query()
                         .table_name(&self.table_name)
                         .index_name("gsi1")
-                        .key_condition_expression("gsi1_pk = :pk AND gsi1_sk BETWEEN :from_sk AND :to_sk")
+                        .key_condition_expression(
+                            "gsi1_pk = :pk AND gsi1_sk BETWEEN :from_sk AND :to_sk",
+                        )
                         .expression_attribute_values(":pk", Self::s(&gsi1_pk))
                         .expression_attribute_values(":from_sk", Self::s(&from_sk))
                         .expression_attribute_values(":to_sk", Self::s(&to_sk));
@@ -591,8 +681,14 @@ impl Repository for DynamoDbRepo {
                         .table_name(&self.table_name)
                         .key_condition_expression("pk = :pk AND sk BETWEEN :from_sk AND :to_sk")
                         .expression_attribute_values(":pk", Self::s(&pk))
-                        .expression_attribute_values(":from_sk", Self::s(&format!("LOG#{}", from.to_rfc3339())))
-                        .expression_attribute_values(":to_sk", Self::s(&format!("LOG#{}", to.to_rfc3339())));
+                        .expression_attribute_values(
+                            ":from_sk",
+                            Self::s(&format!("LOG#{}", from.to_rfc3339())),
+                        )
+                        .expression_attribute_values(
+                            ":to_sk",
+                            Self::s(&format!("LOG#{}", to.to_rfc3339())),
+                        );
 
                     if let Some(key) = exclusive_start_key.take() {
                         q = q.set_exclusive_start_key(Some(key));
@@ -677,5 +773,107 @@ impl Repository for DynamoDbRepo {
         }
 
         Ok(models.into_iter().collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use model::usage_log::Granularity;
+
+    fn dt(s: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .expect("invalid test datetime")
+            .with_timezone(&chrono::Utc)
+    }
+
+    #[test]
+    fn align_down_fifteen_min_rounds_to_slot() {
+        let input = dt("2026-04-02T14:37:22Z");
+        let result = align_down(input, &Granularity::FifteenMin);
+        assert_eq!(result, dt("2026-04-02T14:30:00Z"));
+    }
+
+    #[test]
+    fn align_down_fifteen_min_on_boundary() {
+        let input = dt("2026-04-02T14:30:00Z");
+        let result = align_down(input, &Granularity::FifteenMin);
+        assert_eq!(result, dt("2026-04-02T14:30:00Z"));
+    }
+
+    #[test]
+    fn align_down_thirty_min() {
+        let input = dt("2026-04-02T14:45:00Z");
+        let result = align_down(input, &Granularity::ThirtyMin);
+        assert_eq!(result, dt("2026-04-02T14:30:00Z"));
+    }
+
+    #[test]
+    fn align_down_one_hour() {
+        let input = dt("2026-04-02T14:59:59Z");
+        let result = align_down(input, &Granularity::OneHour);
+        assert_eq!(result, dt("2026-04-02T14:00:00Z"));
+    }
+
+    #[test]
+    fn align_down_four_hours() {
+        let input = dt("2026-04-02T11:30:00Z");
+        let result = align_down(input, &Granularity::FourHours);
+        assert_eq!(result, dt("2026-04-02T08:00:00Z"));
+    }
+
+    #[test]
+    fn align_down_daily() {
+        let input = dt("2026-04-02T23:59:59Z");
+        let result = align_down(input, &Granularity::Daily);
+        assert_eq!(result, dt("2026-04-02T00:00:00Z"));
+    }
+
+    #[test]
+    fn align_down_weekly() {
+        // 2026-04-02 is a Thursday, Monday was 2026-03-30
+        let input = dt("2026-04-02T12:00:00Z");
+        let result = align_down(input, &Granularity::Weekly);
+        assert_eq!(result, dt("2026-03-30T00:00:00Z"));
+    }
+
+    #[test]
+    fn align_down_monthly() {
+        let input = dt("2026-04-15T12:00:00Z");
+        let result = align_down(input, &Granularity::Monthly);
+        assert_eq!(result, dt("2026-04-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn step_period_one_hour() {
+        let input = dt("2026-04-02T14:00:00Z");
+        let result = step_period(input, &Granularity::OneHour);
+        assert_eq!(result, Some(dt("2026-04-02T15:00:00Z")));
+    }
+
+    #[test]
+    fn step_period_monthly_wraps_year() {
+        let input = dt("2026-12-01T00:00:00Z");
+        let result = step_period(input, &Granularity::Monthly);
+        assert_eq!(result, Some(dt("2027-01-01T00:00:00Z")));
+    }
+
+    #[test]
+    fn generate_periods_hourly() {
+        let from = dt("2026-04-02T10:00:00Z");
+        let to = dt("2026-04-02T12:00:00Z");
+        let periods = generate_periods(from, to, &Granularity::OneHour);
+        assert_eq!(periods.len(), 3);
+        assert_eq!(periods[0], "2026-04-02T10:00:00Z");
+        assert_eq!(periods[1], "2026-04-02T11:00:00Z");
+        assert_eq!(periods[2], "2026-04-02T12:00:00Z");
+    }
+
+    #[test]
+    fn generate_periods_empty_when_from_after_to() {
+        let from = dt("2026-04-03T00:00:00Z");
+        let to = dt("2026-04-02T00:00:00Z");
+        let periods = generate_periods(from, to, &Granularity::OneHour);
+        assert!(periods.is_empty());
     }
 }

@@ -200,6 +200,7 @@ impl From<PathRejection> for AppError {
 
 /// Proxy-specific error that returns Anthropic-style JSON responses.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ProxyError {
     #[error("authentication failed: invalid or missing API key")]
     Unauthorized,
@@ -217,7 +218,7 @@ impl IntoResponse for ProxyError {
             ProxyError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
         };
 
-        tracing::error!(error = %self, "Request failed");
+        tracing::warn!(error = %self, "Request failed");
 
         (
             status,

@@ -1,6 +1,6 @@
-pub mod dto;
 mod auth;
 mod config;
+pub mod dto;
 mod metrics;
 mod proxy;
 mod routes;
@@ -42,7 +42,7 @@ async fn main() {
 async fn run_server() {
     let cfg = Config::from_env();
 
-    let repo = config::create_repo().await;
+    let repo = dynamodb::DynamoDbRepo::from_env().await;
 
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(300))
@@ -51,7 +51,7 @@ async fn run_server() {
 
     let (usage_tx, mut usage_rx) = tokio::sync::mpsc::channel::<model::usage_log::UsageLog>(256);
 
-    let writer_repo = config::create_repo().await;
+    let writer_repo = dynamodb::DynamoDbRepo::from_env().await;
 
     tokio::spawn(async move {
         while let Some(log) = usage_rx.recv().await {

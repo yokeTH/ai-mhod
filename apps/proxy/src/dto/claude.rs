@@ -137,3 +137,65 @@ pub fn extract_stream_usage(sse_text: &str) -> StreamUsage {
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_sse_data_valid() {
+        assert_eq!(
+            parse_sse_data("data: {\"key\": true}"),
+            Some("{\"key\": true}")
+        );
+    }
+
+    #[test]
+    fn parse_sse_data_empty() {
+        assert_eq!(parse_sse_data("data: "), None);
+    }
+
+    #[test]
+    fn parse_sse_data_no_prefix() {
+        assert_eq!(parse_sse_data("event: ping"), None);
+    }
+
+    #[test]
+    fn extract_usage_from_message_start_and_delta() {
+        let sse = "\
+event: message_start\n\
+data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":100,\"output_tokens\":0}}}\n\
+\n\
+event: content_block_delta\n\
+data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hello\"}}\n\
+\n\
+event: message_delta\n\
+data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":50}}\n";
+
+        let usage = extract_stream_usage(sse);
+        assert_eq!(usage.input_tokens, Some(100));
+        assert_eq!(usage.output_tokens, Some(50));
+        assert!(usage.error.is_none());
+    }
+
+    #[test]
+    fn extract_usage_detects_error() {
+        let sse = "\
+event: error\n\
+data: {\"error\":{\"code\":\"rate_limit\",\"message\":\"too many requests\"},\"request_id\":\"req_123\"}\n";
+
+        let usage = extract_stream_usage(sse);
+        assert_eq!(
+            usage.error,
+            Some("[rate_limit] too many requests".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_usage_empty_input() {
+        let usage = extract_stream_usage("");
+        assert!(usage.input_tokens.is_none());
+        assert!(usage.output_tokens.is_none());
+        assert!(usage.error.is_none());
+    }
+}
