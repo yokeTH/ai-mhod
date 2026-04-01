@@ -23,7 +23,7 @@ name = "mhod"
 path = "src/main.rs"
 
 [workspace]
-members = ["server", "model", "repository", "dynamodb"]
+members = ["server", "model", "repository", "dynamodb", "error"]
 resolver = "3"
 
 [workspace.package]
@@ -54,6 +54,7 @@ model = { path = "model" }
 server = { path = "server" }
 repository = { path = "repository" }
 dynamodb = { path = "dynamodb" }
+error = { path = "error" }
 
 [profile.release]
 opt-level = 3

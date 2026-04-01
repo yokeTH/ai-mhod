@@ -20,3 +20,4 @@ futures-util = "0.3"
 jsonwebtoken.workspace = true
 serde.workspace = true
 chrono.workspace = true
+error.workspace = true

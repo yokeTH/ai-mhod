@@ -33,6 +33,19 @@ pub struct UsageGraphPoint {
     pub cache: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageShared {
+    pub inputs: f64,
+    pub outputs: f64,
+    pub cache: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageGraphResponse {
+    pub points: Vec<UsageGraphPoint>,
+    pub shared: UsageShared,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Granularity {
