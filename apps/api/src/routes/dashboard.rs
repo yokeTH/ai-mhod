@@ -17,6 +17,15 @@ struct UsageGraphQuery {
     model: Option<String>,
 }
 
+#[inline]
+fn pct(user: i64, all: i64) -> f64 {
+    if all > 0 {
+        (user as f64 / all as f64) * 100.0
+    } else {
+        0.0
+    }
+}
+
 fn parse_iso_date(input: &str) -> Result<chrono::DateTime<chrono::Utc>, ProxyError> {
     // Try full ISO 8601 / RFC 3339 first (e.g. "2026-04-01T00:00:00Z")
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(input) {
@@ -24,7 +33,10 @@ fn parse_iso_date(input: &str) -> Result<chrono::DateTime<chrono::Utc>, ProxyErr
     }
     // Fall back to date-only (e.g. "2026-04-01")
     if let Ok(date) = chrono::NaiveDate::parse_from_str(input, "%Y-%m-%d") {
-        return Ok(date.and_hms_opt(0, 0, 0).unwrap().and_utc());
+        return Ok(date
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight is valid")
+            .and_utc());
     }
     Err(ProxyError::BadRequest(format!("invalid date: {input}")))
 }
@@ -39,12 +51,18 @@ async fn usage_graph_handler(
 
     let from = match params.from.as_deref() {
         Some(v) => parse_iso_date(v)?,
-        None => seven_days_ago.and_hms_opt(0, 0, 0).unwrap().and_utc(),
+        None => seven_days_ago
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight is valid")
+            .and_utc(),
     };
 
     let to = match params.to.as_deref() {
         Some(v) => parse_iso_date(v)?,
-        None => today.and_hms_opt(23, 59, 59).unwrap().and_utc(),
+        None => today
+            .and_hms_opt(23, 59, 59)
+            .expect("23:59:59 is valid")
+            .and_utc(),
     };
 
     let granularity = params.granularity.unwrap_or_default();
@@ -55,7 +73,7 @@ async fn usage_graph_handler(
             &user.user_id,
             from,
             to,
-            granularity.clone(),
+            granularity,
             params.model.as_deref(),
         )
         .await
@@ -67,30 +85,22 @@ async fn usage_graph_handler(
         .await
         .map_err(|e| ProxyError::UpstreamError(format!("failed to query total usage: {e}")))?;
 
-    let user_inputs: i64 = points.iter().map(|p| p.inputs).sum();
-    let user_outputs: i64 = points.iter().map(|p| p.outputs).sum();
-    let user_cache: i64 = points.iter().map(|p| p.cache).sum();
+    let (user_inputs, user_outputs, user_cache) = points
+        .iter()
+        .fold((0i64, 0i64, 0i64), |(i, o, c), p| {
+            (i + p.inputs, o + p.outputs, c + p.cache)
+        });
 
-    let all_inputs: i64 = total_points.iter().map(|p| p.inputs).sum();
-    let all_outputs: i64 = total_points.iter().map(|p| p.outputs).sum();
-    let all_cache: i64 = total_points.iter().map(|p| p.cache).sum();
+    let (all_inputs, all_outputs, all_cache) = total_points
+        .iter()
+        .fold((0i64, 0i64, 0i64), |(i, o, c), p| {
+            (i + p.inputs, o + p.outputs, c + p.cache)
+        });
 
     let shared = model::usage_log::UsageShared {
-        inputs: if all_inputs > 0 {
-            (user_inputs as f64 / all_inputs as f64) * 100.0
-        } else {
-            0.0
-        },
-        outputs: if all_outputs > 0 {
-            (user_outputs as f64 / all_outputs as f64) * 100.0
-        } else {
-            0.0
-        },
-        cache: if all_cache > 0 {
-            (user_cache as f64 / all_cache as f64) * 100.0
-        } else {
-            0.0
-        },
+        inputs: pct(user_inputs, all_inputs),
+        outputs: pct(user_outputs, all_outputs),
+        cache: pct(user_cache, all_cache),
     };
 
     Ok(ApiResponse::ok(model::usage_log::UsageGraphResponse {

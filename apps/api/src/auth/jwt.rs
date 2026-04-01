@@ -22,7 +22,7 @@ pub struct JwksCache {
 }
 
 struct CachedJwks {
-    jwks: Option<JwkSet>,
+    jwks: Option<Arc<JwkSet>>,
     fetched_at: std::time::Instant,
 }
 
@@ -37,18 +37,26 @@ impl JwksCache {
         }
     }
 
-    async fn fetch_jwks(&self) -> anyhow::Result<JwkSet> {
-        let mut cache = self.state.lock().await;
-        if cache.fetched_at.elapsed().as_secs() < 3600 {
-            if let Some(ref jwks) = cache.jwks {
-                return Ok(jwks.clone());
+    async fn fetch_jwks(&self) -> anyhow::Result<Arc<JwkSet>> {
+        // Phase 1: check cache under lock
+        {
+            let cache = self.state.lock().await;
+            if cache.fetched_at.elapsed().as_secs() < 3600
+                && let Some(ref jwks) = cache.jwks
+            {
+                return Ok(Arc::clone(jwks));
             }
         }
+        // Lock dropped — safe to .await HTTP
 
+        // Phase 2: fetch over HTTP without holding the lock
         let resp = reqwest::get(&self.jwks_url).await?;
         let jwks: JwkSet = resp.json().await?;
+        let jwks = Arc::new(jwks);
 
-        cache.jwks = Some(jwks.clone());
+        // Phase 3: re-acquire lock and update cache
+        let mut cache = self.state.lock().await;
+        cache.jwks = Some(Arc::clone(&jwks));
         cache.fetched_at = std::time::Instant::now();
 
         Ok(jwks)
@@ -86,10 +94,10 @@ pub async fn require_jwt(
     let token = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer ").map(|s| s.trim().to_string()))
+        .and_then(|v| v.strip_prefix("Bearer ").map(str::trim))
         .ok_or(ProxyError::Unauthorized)?;
 
-    let sub: String = state.jwks_cache.verify_token(&token).await.map_err(|e| {
+    let sub: String = state.jwks_cache.verify_token(token).await.map_err(|e| {
         tracing::warn!(error = %e, "JWT verification failed");
         ProxyError::Unauthorized
     })?;

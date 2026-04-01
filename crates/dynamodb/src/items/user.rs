@@ -12,6 +12,10 @@ pub struct UserItem {
     pub keycloak_sub: Option<String>,
     pub gsi1_pk: String,
     pub gsi1_sk: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gsi3_pk: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gsi3_sk: Option<String>,
 }
 
 impl From<model::user::User> for UserItem {
@@ -19,6 +23,8 @@ impl From<model::user::User> for UserItem {
         let pk = format!("USER#{}", user.id);
         let gsi1_pk = format!("USERNAME#{}", user.name);
         let gsi1_sk = format!("USER#{}", user.id);
+        let gsi3_pk = user.keycloak_sub.as_ref().map(|sub| format!("KC#{sub}"));
+        let gsi3_sk = gsi3_pk.clone();
         Self {
             sk: pk.clone(),
             pk,
@@ -29,6 +35,8 @@ impl From<model::user::User> for UserItem {
             keycloak_sub: user.keycloak_sub,
             gsi1_pk,
             gsi1_sk,
+            gsi3_pk,
+            gsi3_sk,
         }
     }
 }

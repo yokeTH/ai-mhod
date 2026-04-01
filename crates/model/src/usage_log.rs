@@ -46,7 +46,7 @@ pub struct UsageGraphResponse {
     pub shared: UsageShared,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Granularity {
     #[serde(rename = "15min")]

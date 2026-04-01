@@ -56,8 +56,8 @@ async fn run_server() {
     let writer_repo = repo.clone();
     tokio::spawn(async move {
         while let Some(log) = usage_rx.recv().await {
-            if let Err(e) = writer_repo.insert_usage_log(&log).await {
-                tracing::error!(error = %e, request_id = %log.request_id, "Failed to insert usage log");
+            if let Err(e) = writer_repo.insert_usage_log(log).await {
+                tracing::error!(error = %e, "Failed to insert usage log");
             }
         }
     });

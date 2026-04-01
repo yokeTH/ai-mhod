@@ -29,7 +29,7 @@ pub trait Repository: Send + Sync {
     async fn lookup_key(&self, key: &str) -> anyhow::Result<Option<KeyLookup>>;
     async fn revoke_key(&self, key_id: &str) -> anyhow::Result<()>;
 
-    async fn insert_usage_log(&self, log: &UsageLog) -> anyhow::Result<()>;
+    async fn insert_usage_log(&self, log: UsageLog) -> anyhow::Result<()>;
     async fn usage_summary(
         &self,
         user_id: Option<&str>,

@@ -23,16 +23,9 @@ struct Inner {
 /// For streaming responses, `finish()` is called by the stream terminator
 /// (after all chunks are consumed). The handler also calls it — whichever
 /// runs second is a no-op.
+#[derive(Clone)]
 pub struct RequestMetrics {
     inner: Arc<Inner>,
-}
-
-impl Clone for RequestMetrics {
-    fn clone(&self) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-        }
-    }
 }
 
 impl RequestMetrics {
@@ -55,7 +48,7 @@ impl RequestMetrics {
                 output: AtomicU64::new(0),
                 cache_read: AtomicU64::new(0),
                 finished: AtomicBool::new(false),
-                sse_buffer: std::sync::Mutex::new(String::new()),
+                sse_buffer: std::sync::Mutex::new(String::with_capacity(4096)),
                 usage_tx,
             }),
         }
@@ -67,7 +60,7 @@ impl RequestMetrics {
 
     /// Accumulate raw SSE text for deferred parsing.
     pub fn append_sse(&self, text: &str) {
-        self.inner.sse_buffer.lock().unwrap().push_str(text);
+        self.inner.sse_buffer.lock().expect("sse_buffer lock poisoned").push_str(text);
     }
 
     /// Set token counts directly (for non-streaming responses).
@@ -91,7 +84,7 @@ impl RequestMetrics {
 
         // For streaming: parse the full accumulated SSE text now that the stream is done
         if self.inner.stream {
-            let buf = self.inner.sse_buffer.lock().unwrap();
+            let buf = self.inner.sse_buffer.lock().expect("sse_buffer lock poisoned");
             let usage = crate::dto::claude::extract_stream_usage(&buf);
             if let Some(ref err) = usage.error {
                 tracing::error!(
@@ -142,6 +135,8 @@ impl RequestMetrics {
             cache_read_tokens: if cache > 0 { Some(cache) } else { None },
             duration_ms,
         };
-        let _ = self.inner.usage_tx.try_send(log);
+        if let Err(e) = self.inner.usage_tx.try_send(log) {
+            tracing::warn!(request_id = %self.inner.request_id, "failed to send usage log: {e}");
+        }
     }
 }

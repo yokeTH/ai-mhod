@@ -21,6 +21,7 @@ pub struct UsageLogItem {
 }
 
 impl UsageLogItem {
+    #[must_use]
     pub fn from_log(log: model::usage_log::UsageLog, created_at: String) -> Self {
         let pk = format!("USER#{}", log.user_id);
         let sk = format!("LOG#{created_at}#{}", log.request_id);

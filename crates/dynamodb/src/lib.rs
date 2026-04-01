@@ -34,6 +34,7 @@ impl DynamoDbRepo {
         Self::new(client, table_name)
     }
 
+    #[must_use]
     fn generate_key() -> String {
         let mut buf = String::with_capacity(65);
         buf.push_str("mh_");
@@ -60,82 +61,69 @@ impl DynamoDbRepo {
         let mut logs = Vec::new();
         let mut exclusive_start_key: Option<HashMap<String, AttributeValue>> = None;
 
-        if let Some(model) = model_filter {
-            let gsi1_pk = format!("USERMODEL#{user_id}#{model}");
-            let from_sk = format!("LOG#{}", from.to_rfc3339());
-            let to_sk = format!("LOG#{}", to.to_rfc3339());
+        let (pk_val, index, pk_name, from_sk, to_sk) = match model_filter {
+            Some(model) => (
+                format!("USERMODEL#{user_id}#{model}"),
+                Some("gsi1".to_string()),
+                "gsi1_pk",
+                format!("LOG#{}", from.to_rfc3339()),
+                format!("LOG#{}", to.to_rfc3339()),
+            ),
+            None => (
+                format!("USER#{user_id}"),
+                None,
+                "pk",
+                format!("LOG#{}", from.to_rfc3339()),
+                format!("LOG#{}", to.to_rfc3339()),
+            ),
+        };
 
-            loop {
-                let mut q = self
-                    .client
-                    .query()
-                    .table_name(&self.table_name)
-                    .index_name("gsi1")
-                    .key_condition_expression(
-                        "gsi1_pk = :pk AND gsi1_sk BETWEEN :from_sk AND :to_sk",
-                    )
-                    .expression_attribute_values(":pk", Self::s(&gsi1_pk))
-                    .expression_attribute_values(":from_sk", Self::s(&from_sk))
-                    .expression_attribute_values(":to_sk", Self::s(&to_sk));
+        let sk_name = match index {
+            Some(_) => "gsi1_sk",
+            None => "sk",
+        };
 
-                if let Some(key) = exclusive_start_key.take() {
-                    q = q.set_exclusive_start_key(Some(key));
-                }
+        let key_expr =
+            format!("{pk_name} = :pk AND {sk_name} BETWEEN :from_sk AND :to_sk");
 
-                let resp = q.send().await?;
+        loop {
+            let mut q = self
+                .client
+                .query()
+                .table_name(&self.table_name)
+                .key_condition_expression(&key_expr)
+                .expression_attribute_values(":pk", Self::s(&pk_val))
+                .expression_attribute_values(":from_sk", Self::s(&from_sk))
+                .expression_attribute_values(":to_sk", Self::s(&to_sk));
 
-                for item in resp.items() {
-                    logs.push(serde_dynamo::from_item(item.clone())?);
-                }
-
-                if resp.last_evaluated_key().is_none() {
-                    break;
-                }
-                exclusive_start_key = resp.last_evaluated_key().cloned();
+            if let Some(ref idx) = index {
+                q = q.index_name(idx);
             }
-        } else {
-            let pk = format!("USER#{user_id}");
 
-            loop {
-                let mut q = self
-                    .client
-                    .query()
-                    .table_name(&self.table_name)
-                    .key_condition_expression("pk = :pk AND sk BETWEEN :from_sk AND :to_sk")
-                    .expression_attribute_values(":pk", Self::s(&pk))
-                    .expression_attribute_values(
-                        ":from_sk",
-                        Self::s(&format!("LOG#{}", from.to_rfc3339())),
-                    )
-                    .expression_attribute_values(
-                        ":to_sk",
-                        Self::s(&format!("LOG#{}", to.to_rfc3339())),
-                    );
-
-                if let Some(key) = exclusive_start_key.take() {
-                    q = q.set_exclusive_start_key(Some(key));
-                }
-
-                let resp = q.send().await?;
-
-                for item in resp.items() {
-                    logs.push(serde_dynamo::from_item(item.clone())?);
-                }
-
-                if resp.last_evaluated_key().is_none() {
-                    break;
-                }
-                exclusive_start_key = resp.last_evaluated_key().cloned();
+            if let Some(key) = exclusive_start_key.take() {
+                q = q.set_exclusive_start_key(Some(key));
             }
+
+            let resp = q.send().await?;
+
+            for item in resp.items() {
+                logs.push(serde_dynamo::from_item(item.clone())?);
+            }
+
+            if resp.last_evaluated_key().is_none() {
+                break;
+            }
+            exclusive_start_key = resp.last_evaluated_key().cloned();
         }
 
         Ok(logs)
     }
 }
 
+#[must_use]
 fn align_down(
     dt: chrono::DateTime<chrono::Utc>,
-    granularity: &model::usage_log::Granularity,
+    granularity: model::usage_log::Granularity,
 ) -> chrono::DateTime<chrono::Utc> {
     match granularity {
         model::usage_log::Granularity::FifteenMin => {
@@ -206,7 +194,7 @@ fn align_down(
 
 fn step_period(
     dt: chrono::DateTime<chrono::Utc>,
-    granularity: &model::usage_log::Granularity,
+    granularity: model::usage_log::Granularity,
 ) -> Option<chrono::DateTime<chrono::Utc>> {
     use model::usage_log::Granularity;
     match granularity {
@@ -228,10 +216,11 @@ fn step_period(
     }
 }
 
+#[must_use]
 fn generate_periods(
     from: chrono::DateTime<chrono::Utc>,
     to: chrono::DateTime<chrono::Utc>,
-    granularity: &model::usage_log::Granularity,
+    granularity: model::usage_log::Granularity,
 ) -> Vec<String> {
     let mut periods = Vec::new();
     let mut current = align_down(from, granularity);
@@ -245,9 +234,10 @@ fn generate_periods(
     periods
 }
 
+#[must_use]
 fn aggregate_to_buckets(
     logs: &[UsageLogItem],
-    granularity: &model::usage_log::Granularity,
+    granularity: model::usage_log::Granularity,
 ) -> std::collections::BTreeMap<String, (i64, i64, i64)> {
     let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64)> =
         std::collections::BTreeMap::new();
@@ -257,7 +247,7 @@ fn aggregate_to_buckets(
 
 fn merge_into_buckets(
     logs: &[UsageLogItem],
-    granularity: &model::usage_log::Granularity,
+    granularity: model::usage_log::Granularity,
     buckets: &mut std::collections::BTreeMap<String, (i64, i64, i64)>,
 ) {
     for log_item in logs {
@@ -278,11 +268,12 @@ fn merge_into_buckets(
     }
 }
 
+#[must_use]
 fn fill_periods(
     buckets: std::collections::BTreeMap<String, (i64, i64, i64)>,
     from: chrono::DateTime<chrono::Utc>,
     to: chrono::DateTime<chrono::Utc>,
-    granularity: &model::usage_log::Granularity,
+    granularity: model::usage_log::Granularity,
 ) -> Vec<model::usage_log::UsageGraphPoint> {
     let periods = generate_periods(from, to, granularity);
     periods
@@ -480,10 +471,10 @@ impl Repository for DynamoDbRepo {
         Ok(())
     }
 
-    async fn insert_usage_log(&self, log: &model::usage_log::UsageLog) -> anyhow::Result<()> {
+    async fn insert_usage_log(&self, log: model::usage_log::UsageLog) -> anyhow::Result<()> {
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let item: HashMap<String, AttributeValue> =
-            serde_dynamo::to_item(UsageLogItem::from_log(log.clone(), now))?;
+            serde_dynamo::to_item(UsageLogItem::from_log(log, now))?;
 
         self.client
             .put_item()
@@ -512,6 +503,7 @@ impl Repository for DynamoDbRepo {
         };
 
         for pk in &pk_values {
+            let u_id = pk.strip_prefix("USER#").unwrap_or_default().to_string();
             let mut exclusive_start_key: Option<HashMap<String, AttributeValue>> = None;
 
             loop {
@@ -532,8 +524,6 @@ impl Repository for DynamoDbRepo {
                 for item in resp.items() {
                     let log_item: UsageLogItem = serde_dynamo::from_item(item.clone())?;
 
-                    let u_id = pk.strip_prefix("USER#").unwrap_or_default().to_string();
-
                     if let Some(filter_key_id) = api_key_id
                         && log_item.api_key_id != filter_key_id
                     {
@@ -550,7 +540,7 @@ impl Repository for DynamoDbRepo {
                         aggregates
                             .entry(key)
                             .or_insert_with(|| model::usage_log::UsageRow {
-                                user_id: u_id,
+                                user_id: u_id.clone(),
                                 model: log_item.model.clone(),
                                 api_key_id: Some(log_item.api_key_id.clone()),
                                 total_requests: 0,
@@ -581,14 +571,17 @@ impl Repository for DynamoDbRepo {
 
     async fn update_keycloak_sub(&self, user_id: &str, sub: &str) -> anyhow::Result<()> {
         let pk = format!("USER#{user_id}");
+        let gsi3_pk = format!("KC#{sub}");
 
         self.client
             .update_item()
             .table_name(&self.table_name)
             .key("pk", Self::s(&pk))
             .key("sk", Self::s(&pk))
-            .update_expression("SET keycloak_sub = :sub")
+            .update_expression("SET keycloak_sub = :sub, gsi3_pk = :gsi3pk, gsi3_sk = :gsi3sk")
             .expression_attribute_values(":sub", Self::s(sub))
+            .expression_attribute_values(":gsi3pk", Self::s(&gsi3_pk))
+            .expression_attribute_values(":gsi3sk", Self::s(&gsi3_pk))
             .condition_expression("attribute_exists(pk) AND #t = :type")
             .expression_attribute_names("#t", "type")
             .expression_attribute_values(":type", Self::s("USER"))
@@ -599,36 +592,26 @@ impl Repository for DynamoDbRepo {
     }
 
     async fn lookup_user_by_keycloak_sub(&self, sub: &str) -> anyhow::Result<Option<String>> {
-        let mut exclusive_start_key: Option<HashMap<String, AttributeValue>> = None;
+        let gsi3_pk = format!("KC#{sub}");
 
-        loop {
-            let mut q = self
-                .client
-                .scan()
-                .table_name(&self.table_name)
-                .filter_expression("keycloak_sub = :sub AND #t = :type")
-                .expression_attribute_names("#t", "type")
-                .expression_attribute_values(":sub", Self::s(sub))
-                .expression_attribute_values(":type", Self::s("USER"));
+        let resp = self
+            .client
+            .query()
+            .table_name(&self.table_name)
+            .index_name("gsi3")
+            .key_condition_expression("gsi3_pk = :pk")
+            .expression_attribute_values(":pk", Self::s(&gsi3_pk))
+            .select(Select::AllAttributes)
+            .send()
+            .await?;
 
-            if let Some(key) = exclusive_start_key.take() {
-                q = q.set_exclusive_start_key(Some(key));
-            }
-
-            let resp = q.send().await?;
-
-            if let Some(item) = resp.items().first() {
+        match resp.items().first() {
+            Some(item) => {
                 let user_item: UserItem = serde_dynamo::from_item(item.clone())?;
-                return Ok(Some(user_item.id));
+                Ok(Some(user_item.id))
             }
-
-            if resp.last_evaluated_key().is_none() {
-                break;
-            }
-            exclusive_start_key = resp.last_evaluated_key().cloned();
+            None => Ok(None),
         }
-
-        Ok(None)
     }
 
     async fn usage_graph(
@@ -642,8 +625,8 @@ impl Repository for DynamoDbRepo {
         let logs = self
             .query_usage_logs(user_id, from, to, model_filter)
             .await?;
-        let buckets = aggregate_to_buckets(&logs, &granularity);
-        Ok(fill_periods(buckets, from, to, &granularity))
+        let buckets = aggregate_to_buckets(&logs, granularity);
+        Ok(fill_periods(buckets, from, to, granularity))
     }
 
     async fn usage_graph_total(
@@ -654,17 +637,26 @@ impl Repository for DynamoDbRepo {
         model_filter: Option<&str>,
     ) -> anyhow::Result<Vec<model::usage_log::UsageGraphPoint>> {
         let users = self.list_users().await?;
-        let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64)> =
-            std::collections::BTreeMap::new();
+        let model_filter_owned = model_filter.map(|s| s.to_string());
 
-        for user in &users {
-            let logs = self
-                .query_usage_logs(&user.id, from, to, model_filter)
-                .await?;
-            merge_into_buckets(&logs, &granularity, &mut buckets);
+        let mut join_set = tokio::task::JoinSet::new();
+        for user in users {
+            let repo = self.clone();
+            let filter = model_filter_owned.clone();
+            join_set.spawn(async move {
+                repo.query_usage_logs(&user.id, from, to, filter.as_deref())
+                    .await
+            });
         }
 
-        Ok(fill_periods(buckets, from, to, &granularity))
+        let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64)> =
+            std::collections::BTreeMap::new();
+        while let Some(result) = join_set.join_next().await {
+            let logs = result??;
+            merge_into_buckets(&logs, granularity, &mut buckets);
+        }
+
+        Ok(fill_periods(buckets, from, to, granularity))
     }
 
     async fn list_models(&self, user_id: &str) -> anyhow::Result<Vec<String>> {
@@ -720,42 +712,42 @@ mod tests {
     #[test]
     fn align_down_fifteen_min_rounds_to_slot() {
         let input = dt("2026-04-02T14:37:22Z");
-        let result = align_down(input, &Granularity::FifteenMin);
+        let result = align_down(input, Granularity::FifteenMin);
         assert_eq!(result, dt("2026-04-02T14:30:00Z"));
     }
 
     #[test]
     fn align_down_fifteen_min_on_boundary() {
         let input = dt("2026-04-02T14:30:00Z");
-        let result = align_down(input, &Granularity::FifteenMin);
+        let result = align_down(input, Granularity::FifteenMin);
         assert_eq!(result, dt("2026-04-02T14:30:00Z"));
     }
 
     #[test]
     fn align_down_thirty_min() {
         let input = dt("2026-04-02T14:45:00Z");
-        let result = align_down(input, &Granularity::ThirtyMin);
+        let result = align_down(input, Granularity::ThirtyMin);
         assert_eq!(result, dt("2026-04-02T14:30:00Z"));
     }
 
     #[test]
     fn align_down_one_hour() {
         let input = dt("2026-04-02T14:59:59Z");
-        let result = align_down(input, &Granularity::OneHour);
+        let result = align_down(input, Granularity::OneHour);
         assert_eq!(result, dt("2026-04-02T14:00:00Z"));
     }
 
     #[test]
     fn align_down_four_hours() {
         let input = dt("2026-04-02T11:30:00Z");
-        let result = align_down(input, &Granularity::FourHours);
+        let result = align_down(input, Granularity::FourHours);
         assert_eq!(result, dt("2026-04-02T08:00:00Z"));
     }
 
     #[test]
     fn align_down_daily() {
         let input = dt("2026-04-02T23:59:59Z");
-        let result = align_down(input, &Granularity::Daily);
+        let result = align_down(input, Granularity::Daily);
         assert_eq!(result, dt("2026-04-02T00:00:00Z"));
     }
 
@@ -763,28 +755,28 @@ mod tests {
     fn align_down_weekly() {
         // 2026-04-02 is a Thursday, Monday was 2026-03-30
         let input = dt("2026-04-02T12:00:00Z");
-        let result = align_down(input, &Granularity::Weekly);
+        let result = align_down(input, Granularity::Weekly);
         assert_eq!(result, dt("2026-03-30T00:00:00Z"));
     }
 
     #[test]
     fn align_down_monthly() {
         let input = dt("2026-04-15T12:00:00Z");
-        let result = align_down(input, &Granularity::Monthly);
+        let result = align_down(input, Granularity::Monthly);
         assert_eq!(result, dt("2026-04-01T00:00:00Z"));
     }
 
     #[test]
     fn step_period_one_hour() {
         let input = dt("2026-04-02T14:00:00Z");
-        let result = step_period(input, &Granularity::OneHour);
+        let result = step_period(input, Granularity::OneHour);
         assert_eq!(result, Some(dt("2026-04-02T15:00:00Z")));
     }
 
     #[test]
     fn step_period_monthly_wraps_year() {
         let input = dt("2026-12-01T00:00:00Z");
-        let result = step_period(input, &Granularity::Monthly);
+        let result = step_period(input, Granularity::Monthly);
         assert_eq!(result, Some(dt("2027-01-01T00:00:00Z")));
     }
 
@@ -792,7 +784,7 @@ mod tests {
     fn generate_periods_hourly() {
         let from = dt("2026-04-02T10:00:00Z");
         let to = dt("2026-04-02T12:00:00Z");
-        let periods = generate_periods(from, to, &Granularity::OneHour);
+        let periods = generate_periods(from, to, Granularity::OneHour);
         assert_eq!(periods.len(), 3);
         assert_eq!(periods[0], "2026-04-02T10:00:00Z");
         assert_eq!(periods[1], "2026-04-02T11:00:00Z");
@@ -803,7 +795,7 @@ mod tests {
     fn generate_periods_empty_when_from_after_to() {
         let from = dt("2026-04-03T00:00:00Z");
         let to = dt("2026-04-02T00:00:00Z");
-        let periods = generate_periods(from, to, &Granularity::OneHour);
+        let periods = generate_periods(from, to, Granularity::OneHour);
         assert!(periods.is_empty());
     }
 }
