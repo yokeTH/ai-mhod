@@ -30,6 +30,7 @@ COPY model/Cargo.toml model/Cargo.toml
 COPY repository/Cargo.toml repository/Cargo.toml
 COPY server/Cargo.toml server/Cargo.toml
 COPY dynamodb/Cargo.toml dynamodb/Cargo.toml
+COPY error/Cargo.toml error/Cargo.toml
 
 # Copy source
 COPY src src
@@ -37,6 +38,7 @@ COPY model/src model/src
 COPY repository/src repository/src
 COPY server/src server/src
 COPY dynamodb/src dynamodb/src
+COPY error/src error/src
 
 ENV RUSTFLAGS="-C target-feature=+crt-static"
 
